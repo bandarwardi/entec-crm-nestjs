@@ -59,7 +59,9 @@ export class LeadsService {
     });
     const saved = await lead.save();
     await this.cacheService.invalidateByPattern('dashboard:stats:*');
-    return saved;
+    
+    // Populate the creator details before returning to frontend
+    return this.leadModel.findById(saved._id).populate('createdBy', 'id name email role').exec();
   }
 
   async update(id: string, dto: UpdateLeadDto) {

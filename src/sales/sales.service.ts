@@ -59,7 +59,9 @@ export class SalesService {
     
     // In SQL we had relations: ['orders', 'orders.devices']
     // In Mongo we can find orders separately or use aggregate
-    const orders = await this.orderModel.find({ customer: id }).exec();
+    console.log('Finding orders for customer ID:', id);
+    const orders = await this.orderModel.find({ customer: new Types.ObjectId(id) }).exec();
+    console.log('Found orders:', orders.length);
     
     const result = customer.toObject() as any;
     result.orders = orders;
@@ -189,10 +191,10 @@ export class SalesService {
     const closerAgent = await this.userModel.findById(dto.closerAgentId).exec();
 
     if (!leadAgent) {
-      throw new NotFoundException('الموظف الذي جلب العميل غير موجود');
+      throw new NotFoundException('الموظف الذي جلب العميل غير موجود - CREATE');
     }
     if (!closerAgent) {
-      throw new NotFoundException('الموظف الذي أغلق الطلب غير موجود');
+      throw new NotFoundException('الموظف الذي أغلق الطلب غير موجود - CREATE');
     }
 
     let customerId = dto.customerId ? new Types.ObjectId(dto.customerId) : null;
@@ -228,20 +230,32 @@ export class SalesService {
   }
 
   async updateOrder(id: string, dto: UpdateOrderDto) {
+    console.log('UpdateOrder for ID:', id);
+    console.log('DTO contents:', JSON.stringify(dto));
+    console.log('leadAgentId type:', typeof dto.leadAgentId);
+    console.log('leadAgentId value:', dto.leadAgentId);
     const order = await this.orderModel.findById(id).exec();
     if (!order) throw new NotFoundException('الطلب غير موجود');
 
-    const leadAgent = await this.userModel.findById(dto.leadAgentId).exec();
-    const closerAgent = await this.userModel.findById(dto.closerAgentId).exec();
+    const updateData: any = { ...dto };
 
-    if (!leadAgent) throw new NotFoundException('الموظف الذي جلب العميل غير موجود');
-    if (!closerAgent) throw new NotFoundException('الموظف الذي أغلق الطلب غير موجود');
+    if (dto.leadAgentId && dto.leadAgentId !== 'undefined') {
+      const leadAgent = await this.userModel.findById(dto.leadAgentId).exec();
+      if (!leadAgent) throw new NotFoundException('الموظف الذي جلب العميل غير موجود - UPDATE');
+      updateData.leadAgent = new Types.ObjectId(dto.leadAgentId);
+    }
 
-    const updated = await this.orderModel.findByIdAndUpdate(id, {
-      ...dto,
-      leadAgent: new Types.ObjectId(dto.leadAgentId),
-      closerAgent: new Types.ObjectId(dto.closerAgentId),
-    }, { new: true }).exec();
+    if (dto.closerAgentId && dto.closerAgentId !== 'undefined') {
+      const closerAgent = await this.userModel.findById(dto.closerAgentId).exec();
+      if (!closerAgent) throw new NotFoundException('الموظف الذي أغلق الطلب غير موجود - UPDATE');
+      updateData.closerAgent = new Types.ObjectId(dto.closerAgentId);
+    }
+
+    if (dto.customerId) {
+      updateData.customer = new Types.ObjectId(dto.customerId);
+    }
+
+    const updated = await this.orderModel.findByIdAndUpdate(id, updateData, { new: true }).exec();
 
     await this.invalidateDashboardCache();
     return updated;

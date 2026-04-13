@@ -46,19 +46,20 @@ export class CreateDeviceDto {
 
 export class CreateOrderDto {
   @IsOptional()
-  @IsNumber()
-  customerId?: number;
+  @IsString()
+  customerId?: string;
 
   @IsOptional()
   @ValidateNested()
   @Type(() => CreateCustomerDto)
   newCustomer?: CreateCustomerDto;
 
-  @IsNumber()
-  leadAgentId: number;
-
-  @IsNumber()
-  closerAgentId: number;
+  @IsOptional()
+  @IsString()
+  leadAgentId?: string;
+  @IsOptional()
+  @IsString()
+  closerAgentId?: string;
 
   @IsEnum(OrderType)
   type: OrderType;

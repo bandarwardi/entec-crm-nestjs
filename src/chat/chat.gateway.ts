@@ -73,12 +73,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const message = await this.chatService.sendMessage(userId, data.conversationId, data);
     
     const conv = await this.chatService.getUserConversations(userId);
-    const targetConv = conv.find(c => c.id === data.conversationId);
+    const targetConv = conv.find(c => c.id.toString() === data.conversationId);
     
     if (targetConv) {
         const recipientId = targetConv.otherUser.id;
+        console.log(`Emitting newMessage to user_${userId} and user_${recipientId}`);
         // Emit to both sender and recipient rooms
         this.server.to(`user_${userId}`).to(`user_${recipientId}`).emit('newMessage', message);
+    } else {
+        console.warn(`Conversation ${data.conversationId} not found for message emission`);
     }
   }
 

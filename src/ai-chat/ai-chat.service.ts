@@ -90,22 +90,24 @@ export class AiChatService implements OnModuleInit {
     if (!conversation) throw new NotFoundException('المحادثة غير موجودة');
     if (conversation.user.toString() !== userId) throw new ForbiddenException('لا تملك صلاحية الوصول لهذه المحادثة');
 
+    console.log(`AI Chat: Saving user message for conversation ${conversationId}`);
     // 1. Save User Message
     const userMsg = new this.messageModel({
       conversation: new Types.ObjectId(conversationId),
       role: 'user',
       content
     });
-    await userMsg.save();
+    const savedUserMsg = await userMsg.save();
+    console.log('AI Chat: User message saved:', savedUserMsg._id);
 
     // Update title if it was default
     if (conversation.title === 'محادثة جديدة') {
       conversation.title = content.substring(0, 30) + (content.length > 30 ? '...' : '');
+      await conversation.save();
     }
-    await conversation.save();
 
     // 2. Get History for Gemini
-    const messages = await this.messageModel.find({ conversation: conversationId })
+    const messages = await this.messageModel.find({ conversation: new Types.ObjectId(conversationId) })
       .sort({ createdAt: 1 })
       .exec();
 
@@ -120,12 +122,14 @@ export class AiChatService implements OnModuleInit {
         throw new Error('الذكاء الاصطناعي غير مفعل حالياً. يرجى التأكد من إعدادات النظام.');
       }
 
+      console.log('AI Chat: Requesting Gemini response...');
       const chat = this.model.startChat({
-        history: history.slice(0, -1), // History excluding the last message we just added
+        history: history.slice(0, -1),
       });
 
       const result = await chat.sendMessage(content);
       const aiResponse = result.response.text();
+      console.log('AI Chat: Gemini responded successfully');
 
       // 4. Save AI Message
       const aiMsg = new this.messageModel({
@@ -133,7 +137,9 @@ export class AiChatService implements OnModuleInit {
         role: 'model',
         content: aiResponse
       });
-      return aiMsg.save();
+      const savedAiMsg = await aiMsg.save();
+      console.log('AI Chat: AI message saved:', savedAiMsg._id);
+      return savedAiMsg;
     } catch (error) {
       console.error('Gemini API Error:', error);
       const errorMsg = new this.messageModel({

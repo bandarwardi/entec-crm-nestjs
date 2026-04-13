@@ -1,7 +1,7 @@
 import { Controller, Post, Body, UseGuards, Get, Param, Request, Delete, Put, Query } from '@nestjs/common';
 import { AiChatService } from './ai-chat.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { SalesScenario } from './entities/sales-scenario.entity';
+import { SalesScenario } from './schemas/sales-scenario.schema';
 
 @Controller('ai-chat')
 @UseGuards(JwtAuthGuard)
@@ -21,13 +21,13 @@ export class AiChatController {
   }
 
   @Get('conversations/:id/messages')
-  async getMessages(@Param('id') id: number, @Request() req) {
+  async getMessages(@Param('id') id: string, @Request() req) {
     return this.aiChatService.getConversationMessages(id, req.user.userId);
   }
 
   @Post('conversations/:id/messages')
   async sendMessage(
-    @Param('id') id: number,
+    @Param('id') id: string,
     @Body('message') message: string,
     @Request() req
   ) {
@@ -35,7 +35,7 @@ export class AiChatController {
   }
 
   @Delete('conversations/:id')
-  async deleteConversation(@Param('id') id: number, @Request() req) {
+  async deleteConversation(@Param('id') id: string, @Request() req) {
     return this.aiChatService.deleteConversation(id, req.user.userId);
   }
 
@@ -58,12 +58,12 @@ export class AiChatController {
   }
 
   @Put('scenarios/:id')
-  async updateScenario(@Param('id') id: number, @Body() data: Partial<SalesScenario>) {
+  async updateScenario(@Param('id') id: string, @Body() data: Partial<SalesScenario>) {
     return this.aiChatService.updateScenario(id, data);
   }
 
   @Delete('scenarios/:id')
-  async deleteScenario(@Param('id') id: number) {
+  async deleteScenario(@Param('id') id: string) {
     return this.aiChatService.deleteScenario(id);
   }
 }

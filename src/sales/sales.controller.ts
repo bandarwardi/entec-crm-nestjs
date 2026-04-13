@@ -23,7 +23,7 @@ export class SalesController {
 
   @Get('customers/:id')
   async findOneCustomer(@Param('id') id: string) {
-    return this.salesService.findOneCustomer(+id);
+    return this.salesService.findOneCustomer(id);
   }
 
   @Post('customers')
@@ -35,7 +35,7 @@ export class SalesController {
   @Put('customers/:id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   async updateCustomer(@Param('id') id: string, @Body() dto: UpdateCustomerDto) {
-    return this.salesService.updateCustomer(+id, dto);
+    return this.salesService.updateCustomer(id, dto);
   }
 
   // --- Orders ---
@@ -51,7 +51,7 @@ export class SalesController {
 
   @Get('orders/:id')
   async findOneOrder(@Param('id') id: string) {
-    return this.salesService.findOneOrder(+id);
+    return this.salesService.findOneOrder(id);
   }
 
   @Post('orders')
@@ -61,18 +61,18 @@ export class SalesController {
 
   @Put('orders/:id')
   async updateOrder(@Param('id') id: string, @Body() dto: UpdateOrderDto) {
-    return this.salesService.updateOrder(+id, dto);
+    return this.salesService.updateOrder(id, dto);
   }
 
   @Delete('orders/:id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   async removeOrder(@Param('id') id: string) {
-    return this.salesService.removeOrder(+id);
+    return this.salesService.removeOrder(id);
   }
 
   @Post('orders/:id/send-invoice')
   async sendInvoiceEmail(@Param('id') id: string) {
-    return this.salesService.sendInvoiceToCustomerEmail(+id);
+    return this.salesService.sendInvoiceToCustomerEmail(id);
   }
 
   @Get('geocode')

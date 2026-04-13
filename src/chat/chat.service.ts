@@ -1,91 +1,91 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, Not } from 'typeorm';
-import { Conversation } from './entities/conversation.entity';
-import { Message, MediaType } from './entities/message.entity';
-import { User } from '../users/user.entity';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { Conversation, ConversationDocument } from './schemas/conversation.schema';
+import { Message, MessageDocument, MediaType } from './schemas/message.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
 
 @Injectable()
 export class ChatService {
   constructor(
-    @InjectRepository(Conversation)
-    private readonly conversationRepo: Repository<Conversation>,
-    @InjectRepository(Message)
-    private readonly messageRepo: Repository<Message>,
-    @InjectRepository(User)
-    private readonly userRepo: Repository<User>,
+    @InjectModel(Conversation.name)
+    private readonly conversationModel: Model<ConversationDocument>,
+    @InjectModel(Message.name)
+    private readonly messageModel: Model<MessageDocument>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
   ) {}
 
-  async findOrCreateConversation(user1Id: number, user2Id: number): Promise<Conversation> {
-    const ids = [user1Id, user2Id].sort((a, b) => a - b);
+  async findOrCreateConversation(user1Id: string, user2Id: string): Promise<ConversationDocument> {
+    const ids = [user1Id, user2Id].sort();
     const u1 = ids[0];
     const u2 = ids[1];
 
-    let conversation = await this.conversationRepo.findOne({
-      where: { user1Id: u1, user2Id: u2 },
-      relations: ['user1', 'user2'],
-    });
+    let conversation = await this.conversationModel.findOne({
+      user1: new Types.ObjectId(u1),
+      user2: new Types.ObjectId(u2)
+    }).populate('user1 user2').exec();
 
     if (!conversation) {
-      const user1 = await this.userRepo.findOne({ where: { id: u1 } });
-      const user2 = await this.userRepo.findOne({ where: { id: u2 } });
+      const user1 = await this.userModel.findById(u1).exec();
+      const user2 = await this.userModel.findById(u2).exec();
 
       if (!user1 || !user2) {
         throw new NotFoundException('أحد المستخدمين غير موجود، تعذر بدء المحادثة');
       }
 
-      conversation = this.conversationRepo.create({
-        user1Id: u1,
-        user2Id: u2,
+      conversation = new this.conversationModel({
+        user1: new Types.ObjectId(u1),
+        user2: new Types.ObjectId(u2),
       });
-      conversation = await this.conversationRepo.save(conversation);
-      // Reload relations
-      conversation = await this.conversationRepo.findOne({
-        where: { id: conversation.id },
-        relations: ['user1', 'user2'],
-      });
+      await conversation.save();
+      
+      // Populate and return
+      conversation = await this.conversationModel.findById(conversation._id).populate('user1 user2').exec();
     }
 
     return conversation!;
   }
 
-  async getUserConversations(userId: number) {
-    const conversations = await this.conversationRepo.find({
-      where: [{ user1Id: userId }, { user2Id: userId }],
-      relations: ['user1', 'user2'],
-      order: { lastMessageAt: 'DESC' },
-    });
+  async getUserConversations(userId: string) {
+    const userObjectId = new Types.ObjectId(userId);
+    const conversations = await this.conversationModel.find({
+      $or: [{ user1: userObjectId }, { user2: userObjectId }]
+    })
+    .populate('user1 user2')
+    .sort({ lastMessageAt: -1 })
+    .exec();
 
-    // Add last message and unread count for each conversation
     const results = await Promise.all(
       conversations.map(async (conv) => {
-        const lastMessage = await this.messageRepo.findOne({
-          where: { conversationId: conv.id },
-          order: { createdAt: 'DESC' },
-          relations: ['sender']
-        });
+        const lastMessage = await this.messageModel.findOne({
+          conversation: conv._id
+        })
+        .sort({ createdAt: -1 })
+        .populate('sender')
+        .exec();
 
-        const unreadCount = await this.messageRepo.count({
-          where: {
-            conversationId: conv.id,
-            senderId: userId === conv.user1Id ? conv.user2Id : conv.user1Id,
-            isRead: false,
-          },
-        });
+        const otherUserId = userId === conv.user1._id.toString() ? conv.user2._id : conv.user1._id;
+        
+        const unreadCount = await this.messageModel.countDocuments({
+          conversation: conv._id,
+          sender: otherUserId,
+          isRead: false,
+        }).exec();
 
-        const otherUser = userId === conv.user1Id ? conv.user2 : conv.user1;
+        const otherUser = userId === conv.user1._id.toString() ? conv.user2 : conv.user1;
 
         return {
-          id: conv.id,
-          user1Id: conv.user1Id,
-          user2Id: conv.user2Id,
+          id: (conv as any)._id,
+          user1Id: (conv as any).user1._id,
+          user2Id: (conv as any).user2._id,
           lastMessageAt: conv.lastMessageAt,
-          createdAt: conv.createdAt,
+          createdAt: (conv as any).createdAt,
           otherUser: {
-            id: otherUser.id,
-            name: otherUser.name,
-            email: otherUser.email,
-            role: otherUser.role
+            id: (otherUser as any)._id,
+            name: (otherUser as any).name,
+            email: (otherUser as any).email,
+            role: (otherUser as any).role
           },
           lastMessage,
           unreadCount,
@@ -96,72 +96,64 @@ export class ChatService {
     return results;
   }
 
-  async getMessages(conversationId: number, userId: number, before?: string | Date, limit = 15) {
-    const conversation = await this.conversationRepo.findOne({
-        where: { id: conversationId }
-    });
+  async getMessages(conversationId: string, userId: string, before?: string | Date, limit = 15) {
+    const conversation = await this.conversationModel.findById(conversationId).exec();
     if (!conversation) {
         throw new NotFoundException('المحادثة غير موجودة');
     }
     
-    if (conversation.user1Id !== userId && conversation.user2Id !== userId) {
+    if (conversation.user1.toString() !== userId && conversation.user2.toString() !== userId) {
         throw new BadRequestException('ليس لديك صلاحية للوصول إلى هذه المحادثة');
     }
 
-    const where: any = { conversationId };
+    const filter: any = { conversation: new Types.ObjectId(conversationId) };
     if (before) {
-      where.createdAt = LessThan(new Date(before));
+      filter.createdAt = { $lt: new Date(before) };
     }
 
-    const messages = await this.messageRepo.find({
-      where,
-      order: { createdAt: 'DESC' },
-      take: limit,
-      relations: ['sender'],
-    });
+    const messages = await this.messageModel.find(filter)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate('sender')
+      .exec();
 
     return messages.reverse();
   }
 
-  async sendMessage(senderId: number, conversationId: number, data: { content?: string; mediaUrl?: string; mediaType?: MediaType; originalFileName?: string }) {
-    const conversation = await this.conversationRepo.findOne({
-        where: { id: conversationId }
-    });
+  async sendMessage(senderId: string, conversationId: string, data: { content?: string; mediaUrl?: string; mediaType?: MediaType; originalFileName?: string }) {
+    const conversation = await this.conversationModel.findById(conversationId).exec();
     if (!conversation) throw new NotFoundException('المحادثة غير موجودة، لا يمكن إرسال الرسالة');
 
-    if (conversation.user1Id !== senderId && conversation.user2Id !== senderId) {
+    if (conversation.user1.toString() !== senderId && conversation.user2.toString() !== senderId) {
         throw new BadRequestException('لا يمكنك إرسال رسائل في هذه المحادثة');
     }
 
-    const message = this.messageRepo.create({
-      senderId,
-      conversationId,
+    const message = new this.messageModel({
+      sender: new Types.ObjectId(senderId),
+      conversation: new Types.ObjectId(conversationId),
       ...data,
     });
 
-    const savedMessage = await this.messageRepo.save(message);
+    const savedMessage = await message.save();
 
     // Update last message time
-    await this.conversationRepo.update(conversationId, {
+    await this.conversationModel.findByIdAndUpdate(conversationId, {
       lastMessageAt: savedMessage.createdAt,
-    });
+    }).exec();
 
-    return this.messageRepo.findOne({
-        where: { id: savedMessage.id },
-        relations: ['sender']
-    });
+    return this.messageModel.findById(savedMessage._id)
+        .populate('sender')
+        .exec();
   }
 
-  async markAsRead(conversationId: number, userId: number) {
-    await this.messageRepo.update(
+  async markAsRead(conversationId: string, userId: string) {
+    await this.messageModel.updateMany(
       {
-        conversationId,
-        senderId: Not(userId), // Messages not sent by me
+        conversation: new Types.ObjectId(conversationId),
+        sender: { $ne: new Types.ObjectId(userId) },
         isRead: false,
       },
       { isRead: true },
-    );
+    ).exec();
   }
 }
-
-// I need NotIn from typeorm

@@ -23,13 +23,13 @@ export class LeadsController {
 
   @Put(':id')
   async update(@Param('id') id: string, @Body() updateLeadDto: UpdateLeadDto) {
-    return this.leadsService.update(+id, updateLeadDto);
+    return this.leadsService.update(id, updateLeadDto);
   }
 
   @Delete(':id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   async remove(@Param('id') id: string) {
-    return this.leadsService.remove(+id);
+    return this.leadsService.remove(id);
   }
 
   @Get('reminders')

@@ -4,7 +4,7 @@ import * as handlebars from 'handlebars';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DateTime } from 'luxon';
-import { Order } from './order.entity';
+import { Order } from './schemas/order.schema';
 
 @Injectable()
 export class InvoicePdfService {
@@ -17,10 +17,10 @@ export class InvoicePdfService {
 
     // Prepare data
     const data = {
-      orderId: order.id,
-      customerName: order.customer.name,
-      customerEmail: order.customer.email,
-      customerPhone: order.customer.phone,
+      orderId: (order as any)._id,
+      customerName: (order.customer as any).name,
+      customerEmail: (order.customer as any).email,
+      customerPhone: (order.customer as any).phone,
       orderDate: DateTime.fromJSDate(new Date(order.createdAt)).toFormat('yyyy-MM-dd'),
       expirationDate: order.appExpiryDate ? DateTime.fromJSDate(new Date(order.appExpiryDate)).toFormat('yyyy-MM-dd') : 'N/A',
       serverExpiryDate: order.serverExpiryDate ? DateTime.fromJSDate(new Date(order.serverExpiryDate)).toFormat('yyyy-MM-dd') : 'N/A',

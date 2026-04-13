@@ -1,11 +1,11 @@
 import { Injectable, OnModuleInit, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
-import { AiConversation } from './entities/ai-conversation.entity';
-import { AiMessage } from './entities/ai-message.entity';
-import { SalesScenario } from './entities/sales-scenario.entity';
+import { AiConversation, AiConversationDocument } from './schemas/ai-conversation.schema';
+import { AiMessage, AiMessageDocument } from './schemas/ai-message.schema';
+import { SalesScenario, SalesScenarioDocument } from './schemas/sales-scenario.schema';
 
 @Injectable()
 export class AiChatService implements OnModuleInit {
@@ -14,12 +14,12 @@ export class AiChatService implements OnModuleInit {
 
   constructor(
     private configService: ConfigService,
-    @InjectRepository(AiConversation)
-    private readonly conversationRepo: Repository<AiConversation>,
-    @InjectRepository(AiMessage)
-    private readonly messageRepo: Repository<AiMessage>,
-    @InjectRepository(SalesScenario)
-    private readonly scenarioRepo: Repository<SalesScenario>,
+    @InjectModel(AiConversation.name)
+    private readonly conversationModel: Model<AiConversationDocument>,
+    @InjectModel(AiMessage.name)
+    private readonly messageModel: Model<AiMessageDocument>,
+    @InjectModel(SalesScenario.name)
+    private readonly scenarioModel: Model<SalesScenarioDocument>,
   ) {
     const apiKey = this.configService.get<string>('GEMINI_API_KEY');
     if (!apiKey) {
@@ -61,57 +61,53 @@ export class AiChatService implements OnModuleInit {
 
   // --- Conversations & Messages ---
 
-  async createConversation(userId: number, title?: string) {
-    const conversation = this.conversationRepo.create({
-      userId,
+  async createConversation(userId: string, title?: string) {
+    const conversation = new this.conversationModel({
+      user: new Types.ObjectId(userId),
       title: title || 'محادثة جديدة'
     });
-    return this.conversationRepo.save(conversation);
+    return conversation.save();
   }
 
-  async getUserConversations(userId: number) {
-    return this.conversationRepo.find({
-      where: { userId },
-      order: { updatedAt: 'DESC' }
-    });
+  async getUserConversations(userId: string) {
+    return this.conversationModel.find({ user: userId })
+      .sort({ updatedAt: -1 })
+      .exec();
   }
 
-  async getConversationMessages(conversationId: number, userId: number) {
-    const conversation = await this.conversationRepo.findOne({ where: { id: conversationId } });
+  async getConversationMessages(conversationId: string, userId: string) {
+    const conversation = await this.conversationModel.findById(conversationId).exec();
     if (!conversation) throw new NotFoundException('المحادثة غير موجودة');
-    if (conversation.userId !== userId) throw new ForbiddenException('لا تملك صلاحية الوصول لهذه المحادثة');
+    if (conversation.user.toString() !== userId) throw new ForbiddenException('لا تملك صلاحية الوصول لهذه المحادثة');
 
-    return this.messageRepo.find({
-      where: { conversationId },
-      order: { createdAt: 'ASC' }
-    });
+    return this.messageModel.find({ conversation: conversationId })
+      .sort({ createdAt: 1 })
+      .exec();
   }
 
-  async sendMessage(userId: number, conversationId: number, content: string) {
-    const conversation = await this.conversationRepo.findOne({ where: { id: conversationId } });
+  async sendMessage(userId: string, conversationId: string, content: string) {
+    const conversation = await this.conversationModel.findById(conversationId).exec();
     if (!conversation) throw new NotFoundException('المحادثة غير موجودة');
-    if (conversation.userId !== userId) throw new ForbiddenException('لا تملك صلاحية الوصول لهذه المحادثة');
+    if (conversation.user.toString() !== userId) throw new ForbiddenException('لا تملك صلاحية الوصول لهذه المحادثة');
 
     // 1. Save User Message
-    const userMsg = this.messageRepo.create({
-      conversationId,
+    const userMsg = new this.messageModel({
+      conversation: new Types.ObjectId(conversationId),
       role: 'user',
       content
     });
-    await this.messageRepo.save(userMsg);
+    await userMsg.save();
 
     // Update title if it was default
     if (conversation.title === 'محادثة جديدة') {
       conversation.title = content.substring(0, 30) + (content.length > 30 ? '...' : '');
     }
-    conversation.updatedAt = new Date();
-    await this.conversationRepo.save(conversation);
+    await conversation.save();
 
     // 2. Get History for Gemini
-    const messages = await this.messageRepo.find({
-      where: { conversationId },
-      order: { createdAt: 'ASC' }
-    });
+    const messages = await this.messageModel.find({ conversation: conversationId })
+      .sort({ createdAt: 1 })
+      .exec();
 
     const history = messages.map(m => ({
       role: m.role,
@@ -132,61 +128,60 @@ export class AiChatService implements OnModuleInit {
       const aiResponse = result.response.text();
 
       // 4. Save AI Message
-      const aiMsg = this.messageRepo.create({
-        conversationId,
+      const aiMsg = new this.messageModel({
+        conversation: new Types.ObjectId(conversationId),
         role: 'model',
         content: aiResponse
       });
-      return this.messageRepo.save(aiMsg);
+      return aiMsg.save();
     } catch (error) {
       console.error('Gemini API Error:', error);
-      // Save an error message for the user so they see what happened
-      const errorMsg = this.messageRepo.create({
-        conversationId,
+      const errorMsg = new this.messageModel({
+        conversation: new Types.ObjectId(conversationId),
         role: 'model',
         content: 'عذراً، حدث خطأ أثناء الاتصال بالذكاء الاصطناعي: ' + (error.message || 'خطأ غير معروف')
       });
-      return this.messageRepo.save(errorMsg);
+      return errorMsg.save();
     }
   }
 
-  async deleteConversation(conversationId: number, userId: number) {
-    const conversation = await this.conversationRepo.findOne({ where: { id: conversationId } });
+  async deleteConversation(conversationId: string, userId: string) {
+    const conversation = await this.conversationModel.findById(conversationId).exec();
     if (!conversation) throw new NotFoundException('المحادثة غير موجودة');
-    if (conversation.userId !== userId) throw new ForbiddenException('لا تملك صلاحية الوصول لهذه المحادثة');
+    if (conversation.user.toString() !== userId) throw new ForbiddenException('لا تملك صلاحية الوصول لهذه المحادثة');
 
-    return this.conversationRepo.remove(conversation);
+    // Also delete messages
+    await this.messageModel.deleteMany({ conversation: conversationId }).exec();
+    return this.conversationModel.findByIdAndDelete(conversationId).exec();
   }
 
   // --- Sales Scenarios ---
 
   async getAllScenarios(onlyActive = true) {
-    return this.scenarioRepo.find({
-      where: onlyActive ? { isActive: true } : {},
-      order: { sortOrder: 'ASC' }
-    });
+    return this.scenarioModel.find(onlyActive ? { isActive: true } : {})
+      .sort({ sortOrder: 1 })
+      .exec();
   }
 
-  async getScenario(id: number) {
-    return this.scenarioRepo.findOne({ where: { id } });
+  async getScenario(id: string) {
+    return this.scenarioModel.findById(id).exec();
   }
 
   async createScenario(data: Partial<SalesScenario>) {
-    const scenario = this.scenarioRepo.create(data);
-    return this.scenarioRepo.save(scenario);
+    const scenario = new this.scenarioModel(data);
+    return scenario.save();
   }
 
-  async updateScenario(id: number, data: Partial<SalesScenario>) {
-    await this.scenarioRepo.update(id, data);
-    return this.getScenario(id);
+  async updateScenario(id: string, data: Partial<SalesScenario>) {
+    return this.scenarioModel.findByIdAndUpdate(id, data, { new: true }).exec();
   }
 
-  async deleteScenario(id: number) {
-    return this.scenarioRepo.delete(id);
+  async deleteScenario(id: string) {
+    return this.scenarioModel.findByIdAndDelete(id).exec();
   }
 
   private async seedScenarios() {
-    const count = await this.scenarioRepo.count();
+    const count = await this.scenarioModel.countDocuments().exec();
     if (count > 0) return;
 
     const scenarios = [
@@ -240,6 +235,6 @@ export class AiChatService implements OnModuleInit {
       }
     ];
 
-    await this.scenarioRepo.save(scenarios);
+    await this.scenarioModel.insertMany(scenarios);
   }
 }

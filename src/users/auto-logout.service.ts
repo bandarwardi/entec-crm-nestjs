@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { UsersService } from './users.service';
 import { WorkSettingsService } from '../work-settings/work-settings.service';
 import { UserStatus } from './user-status.enum';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not } from 'typeorm';
-import { User } from './user.entity';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { User, UserDocument } from './schemas/user.schema';
 import { Role } from './roles.enum';
 import { DateTime } from 'luxon';
 
@@ -16,12 +16,11 @@ export class AutoLogoutService {
   constructor(
     private usersService: UsersService,
     private workSettingsService: WorkSettingsService,
-    @InjectRepository(User)
-    private usersRepository: Repository<User>,
+    @InjectModel(User.name)
+    private userModel: Model<UserDocument>,
   ) {}
 
-  // Run every day at 7 AM Cairo time (1 hour after default 6 AM shift end)
-  // The cron uses the server time by default, but we can specify the timezone.
+  // Run every day at 7 AM Cairo time
   @Cron('0 0 7 * * *', {
     timeZone: 'Africa/Cairo',
   })
@@ -30,15 +29,12 @@ export class AutoLogoutService {
 
     const settings = await this.workSettingsService.getSettings();
     const timezone = settings.timezone || 'Africa/Cairo';
-    const now = DateTime.now().setZone(timezone);
 
     // Get all agents who are not OFFLINE
-    const activeAgents = await this.usersRepository.find({
-      where: {
-        role: Role.AGENT,
-        currentStatus: Not(UserStatus.OFFLINE),
-      },
-    });
+    const activeAgents = await this.userModel.find({
+      role: Role.AGENT,
+      currentStatus: { $ne: UserStatus.OFFLINE },
+    }).exec();
 
     if (activeAgents.length === 0) {
       this.logger.log('No active agents found for auto-logout.');
@@ -50,14 +46,14 @@ export class AutoLogoutService {
     for (const agent of activeAgents) {
       try {
         await this.usersService.updateStatus(
-          agent.id,
+          agent._id,
           UserStatus.OFFLINE,
           undefined,
           'تسجيل خروج تلقائي (انتهاء الدوام)',
         );
-        this.logger.log(`Auto-logged out agent: ${agent.name} (ID: ${agent.id})`);
+        this.logger.log(`Auto-logged out agent: ${agent.name} (ID: ${agent._id})`);
       } catch (error) {
-        this.logger.error(`Failed to auto-logout agent ${agent.id}: ${error.message}`);
+        this.logger.error(`Failed to auto-logout agent ${agent._id}: ${error.message}`);
       }
     }
 

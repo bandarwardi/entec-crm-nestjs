@@ -1,16 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, MoreThanOrEqual, LessThanOrEqual, IsNull, Not } from 'typeorm';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import { CacheService } from '../common/cache.service';
-import { Lead } from './lead.entity';
+import { Lead, LeadDocument } from './schemas/lead.schema';
 import { CreateLeadDto, UpdateLeadDto, QueryLeadsDto } from './leads.dto';
-import { User } from '../users/user.entity';
 
 @Injectable()
 export class LeadsService {
   constructor(
-    @InjectRepository(Lead)
-    private readonly leadsRepository: Repository<Lead>,
+    @InjectModel(Lead.name)
+    private readonly leadModel: Model<LeadDocument>,
     private readonly cacheService: CacheService,
   ) { }
 
@@ -18,32 +17,32 @@ export class LeadsService {
     const { page = 1, limit = 20, search, status, state, hasReminder } = query;
     const skip = (page - 1) * limit;
 
-    const baseWhere: any = {};
-    if (status) baseWhere.status = status;
-    if (state) baseWhere.state = state;
-    if (hasReminder === 'true') baseWhere.reminderAt = Not(IsNull());
-    if (hasReminder === 'false') baseWhere.reminderAt = IsNull();
+    const filter: any = {};
+    if (status) filter.status = status;
+    if (state) filter.state = state;
+    if (hasReminder === 'true') filter.reminderAt = { $ne: null };
+    if (hasReminder === 'false') filter.reminderAt = null;
 
     // Restriction for Agents
     if (user.role === 'agent') {
-      baseWhere.createdBy = { id: user.userId };
+      filter.createdBy = new Types.ObjectId(user.userId);
     }
 
-    let finalWhere: any = baseWhere;
     if (search) {
-      finalWhere = [
-        { ...baseWhere, name: Like(`%${search}%`) },
-        { ...baseWhere, phone: Like(`%${search}%`) }
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } }
       ];
     }
 
-    const [data, total] = await this.leadsRepository.findAndCount({
-      where: finalWhere,
-      skip,
-      take: limit,
-      order: { createdAt: 'DESC' },
-      relations: ['createdBy'],
-    });
+    const data = await this.leadModel.find(filter)
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 })
+      .populate('createdBy', 'id name email role')
+      .exec();
+
+    const total = await this.leadModel.countDocuments(filter).exec();
 
     return {
       data,
@@ -54,71 +53,72 @@ export class LeadsService {
   }
 
   async create(dto: CreateLeadDto, user: any) {
-    const lead = this.leadsRepository.create({
+    const lead = new this.leadModel({
       ...dto,
-      createdBy: { id: user.userId } as any,
+      createdBy: new Types.ObjectId(user.userId),
     });
-    const saved = await this.leadsRepository.save(lead);
+    const saved = await lead.save();
     await this.cacheService.invalidateByPattern('dashboard:stats:*');
     return saved;
   }
 
-  async update(id: number, dto: UpdateLeadDto) {
-    const lead = await this.leadsRepository.findOne({ where: { id } });
+  async update(id: string, dto: UpdateLeadDto) {
+    const lead = await this.leadModel.findByIdAndUpdate(id, dto, { new: true }).exec();
     if (!lead) throw new NotFoundException('العميل المحتمل غير موجود، تعذر التحديث');
 
-    Object.assign(lead, dto);
-    const saved = await this.leadsRepository.save(lead);
     await this.cacheService.invalidateByPattern('dashboard:stats:*');
-    return saved;
+    return lead;
   }
 
-  async remove(id: number) {
-    const result = await this.leadsRepository.delete(id);
-    if (result.affected === 0) throw new NotFoundException('العميل المحتمل غير موجود، تعذر الحذف');
+  async remove(id: string) {
+    const result = await this.leadModel.findByIdAndDelete(id).exec();
+    if (!result) throw new NotFoundException('العميل المحتمل غير موجود، تعذر الحذف');
     await this.cacheService.invalidateByPattern('dashboard:stats:*');
     return { success: true };
   }
 
-  async getPendingReminders(userId: number) {
+  async getPendingReminders(userId: string) {
     const now = new Date();
     const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
     const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
-    return this.leadsRepository.find({
-      where: {
-        createdBy: { id: userId },
-        reminderRead: false,
-        reminderAt: MoreThanOrEqual(oneHourAgo) as any,
+    return this.leadModel.find({
+      createdBy: userId,
+      reminderRead: false,
+      reminderAt: {
+        $gte: oneHourAgo,
+        $lte: oneHourFromNow
       },
-      order: { reminderAt: 'ASC' },
-    }).then(leads => leads.filter(l => l.reminderAt <= oneHourFromNow));
+    }).sort({ reminderAt: 1 }).exec();
   }
 
-  async markRemindersAsRead(userId: number) {
+  async markRemindersAsRead(userId: string) {
     const reminders = await this.getPendingReminders(userId);
     if (reminders.length > 0) {
-      await this.leadsRepository.update(
-        reminders.map(r => r.id),
+      await this.leadModel.updateMany(
+        { _id: { $in: reminders.map(r => r._id) } },
         { reminderRead: true }
-      );
+      ).exec();
     }
     return { success: true };
   }
 
-  async getAllReminders(userId: number, query: { page?: number, limit?: number }) {
+  async getAllReminders(userId: string, query: { page?: number, limit?: number }) {
     const { page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
-    const [data, total] = await this.leadsRepository.findAndCount({
-      where: {
-        createdBy: { id: userId },
-        reminderAt: MoreThanOrEqual(new Date('2000-01-01')) as any, // Not null basically
-      },
-      order: { reminderAt: 'DESC' },
-      skip,
-      take: limit,
-    });
+    const filter = {
+      createdBy: userId,
+      reminderAt: { $ne: null }
+    };
+
+    const data = await this.leadModel.find(filter)
+      .sort({ reminderAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .exec();
+
+    const total = await this.leadModel.countDocuments(filter).exec();
 
     return {
       data,
@@ -129,25 +129,24 @@ export class LeadsService {
   }
 
   async bulkCreate(leads: CreateLeadDto[], user: any) {
-    const leadsToSave = leads.map(dto => this.leadsRepository.create({
+    const leadsToSave = leads.map(dto => ({
       ...dto,
-      createdBy: { id: user.userId } as any,
+      createdBy: new Types.ObjectId(user.userId),
     }));
-    const saved = await this.leadsRepository.save(leadsToSave);
+    const saved = await this.leadModel.insertMany(leadsToSave);
     await this.cacheService.invalidateByPattern('dashboard:stats:*');
     return saved;
   }
 
   async exportAll(user: any) {
-    const where: any = {};
+    const filter: any = {};
     if (user.role === 'agent') {
-      where.createdBy = { id: user.userId };
+      filter.createdBy = new Types.ObjectId(user.userId);
     }
 
-    return this.leadsRepository.find({
-      where,
-      order: { createdAt: 'DESC' },
-      relations: ['createdBy'],
-    });
+    return this.leadModel.find(filter)
+      .sort({ createdAt: -1 })
+      .populate('createdBy', 'id name email role')
+      .exec();
   }
 }

@@ -1,85 +1,88 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
-import { User } from './user.entity';
-import { UserActivity } from './user-activity.entity';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { User, UserDocument } from './schemas/user.schema';
+import { UserActivity, UserActivityDocument } from './schemas/user-activity.schema';
 import { UserStatus, BreakReason } from './user-status.enum';
 
 @Injectable()
 export class UsersService {
   constructor(
-    @InjectRepository(User)
-    private usersRepository: Repository<User>,
-    @InjectRepository(UserActivity)
-    private activitiesRepository: Repository<UserActivity>,
+    @InjectModel(User.name)
+    private userModel: Model<UserDocument>,
+    @InjectModel(UserActivity.name)
+    private activityModel: Model<UserActivityDocument>,
   ) { }
 
-  async updateStatus(userId: number, status: UserStatus, breakReason?: BreakReason, notes?: string) {
-    const user = await this.usersRepository.findOne({ where: { id: userId } });
+  async updateStatus(userId: any, status: UserStatus, breakReason?: BreakReason, notes?: string) {
+    const user = await this.userModel.findById(userId);
     if (!user) return null;
 
     // Log the activity
-    const activity = this.activitiesRepository.create({
-      user,
+    const activity = new this.activityModel({
+      user: userId,
       status,
       breakReason,
       notes,
     });
-    await this.activitiesRepository.save(activity);
+    await activity.save();
 
     // Update user current status
     user.currentStatus = status;
     user.lastStatusChange = new Date();
-    return this.usersRepository.save(user);
+    return user.save();
   }
 
-  async getUserActivities(userId: number, limit: number = 50) {
-    return this.activitiesRepository.find({
-      where: { user: { id: userId } },
-      order: { timestamp: 'DESC' },
-      take: limit,
-    });
+  async getUserActivities(userId: any, limit: number = 50) {
+    return this.activityModel.find({ user: userId })
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .exec();
   }
 
   async getAllUserActivities(limit: number = 100) {
-    return this.activitiesRepository.find({
-      relations: ['user'],
-      order: { timestamp: 'DESC' },
-      take: limit,
-    });
+    return this.activityModel.find()
+      .populate('user', 'id name email role avatar currentStatus')
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .exec();
   }
 
   async findOneByEmail(email: string): Promise<User | null> {
-    return this.usersRepository.findOne({ where: { email } });
+    return this.userModel.findOne({ email }).exec();
   }
 
-  async create(userData: Partial<User>): Promise<User> {
-    const user = this.usersRepository.create(userData);
-    return this.usersRepository.save(user);
+  async create(userData: Partial<User>): Promise<UserDocument> {
+    const user = new this.userModel(userData);
+    return user.save();
   }
 
   async findAll(search?: string): Promise<User[]> {
-    const where = search ? [
-      { name: Like(`%${search}%`) },
-      { email: Like(`%${search}%`) }
-    ] : {};
+    const filter = search ? {
+      $or: [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ]
+    } : {};
 
-    return this.usersRepository.find({ 
-      where,
-      select: ['id', 'name', 'email', 'role', 'avatar', 'currentStatus', 'createdAt'] 
-    });
+    return this.userModel.find(filter)
+      .select('id name email role avatar currentStatus createdAt')
+      .exec();
   }
 
-  async findOne(id: number): Promise<User | null> {
-    return this.usersRepository.findOne({ where: { id }, select: ['id', 'name', 'email', 'role', 'avatar', 'currentStatus', 'createdAt'] });
+  async findOne(id: any): Promise<User | null> {
+    return this.userModel.findById(id)
+      .select('id name email role avatar currentStatus createdAt')
+      .exec();
   }
 
-  async update(id: number, updateData: Partial<User>): Promise<User | null> {
-    await this.usersRepository.update(id, updateData);
-    return this.findOne(id);
+  async update(id: any, updateData: Partial<User>): Promise<User | null> {
+    return this.userModel.findByIdAndUpdate(id, updateData, { new: true })
+      .select('id name email role avatar currentStatus createdAt')
+      .exec();
   }
 
-  async remove(id: number): Promise<void> {
-    await this.usersRepository.delete(id);
+  async remove(id: any): Promise<void> {
+    await this.userModel.findByIdAndDelete(id).exec();
   }
 }

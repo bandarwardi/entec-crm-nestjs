@@ -110,7 +110,7 @@ export class UsersController {
   @Get(':id/performance')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   async getMonthlyPerformance(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id') id: string,
     @Query('year', ParseIntPipe) year: number,
     @Query('month', ParseIntPipe) month: number,
   ) {
@@ -120,7 +120,7 @@ export class UsersController {
   @Get(':id/performance/:date')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   async getDailyPerformance(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id') id: string,
     @Param('date') date: string,
   ) {
     return this.performanceService.getDailyPerformance(id, date);
@@ -128,7 +128,7 @@ export class UsersController {
 
   @Get(':id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.AGENT)
-  async findOne(@Param('id', ParseIntPipe) id: number) {
+  async findOne(@Param('id') id: string) {
     const user = await this.usersService.findOne(id);
     if (!user) throw new NotFoundException('المستخدم غير موجود');
     return user;
@@ -136,7 +136,7 @@ export class UsersController {
 
   @Put(':id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
-  async update(@Param('id', ParseIntPipe) id: number, @Body() updateUserDto: any) {
+  async update(@Param('id') id: string, @Body() updateUserDto: any) {
     const user = await this.usersService.findOne(id);
     if (!user) throw new NotFoundException('المستخدم غير موجود');
 
@@ -149,7 +149,7 @@ export class UsersController {
 
   @Delete(':id')
   @Roles(Role.SUPER_ADMIN)
-  async remove(@Param('id', ParseIntPipe) id: number) {
+  async remove(@Param('id') id: string) {
     const user = await this.usersService.findOne(id);
     if (!user) throw new NotFoundException('المستخدم غير موجود');
 

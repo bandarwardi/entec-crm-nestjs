@@ -1,11 +1,10 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, MoreThan } from 'typeorm';
-import { LoginRequest } from './login-request.entity';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { LoginRequest, LoginRequestDocument } from './schemas/login-request.schema';
 import { UserStatus } from '../users/user-status.enum';
 
 @Injectable()
@@ -13,76 +12,73 @@ export class AuthService {
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
-    @InjectRepository(LoginRequest)
-    private loginRequestRepository: Repository<LoginRequest>
+    @InjectModel(LoginRequest.name)
+    private loginRequestModel: Model<LoginRequestDocument>
   ) {}
 
   async submitLoginRequest(user: any, data: { lat: number, lng: number, device: string, ip: string }) {
-    const request = this.loginRequestRepository.create({
-      user: { id: user.id } as any,
+    const request = new this.loginRequestModel({
+      user: user.id,
       latitude: data.lat,
       longitude: data.lng,
       deviceInfo: data.device,
       ipAddress: data.ip,
       status: 'pending'
     });
-    return this.loginRequestRepository.save(request);
+    return request.save();
   }
 
-  async findApprovedRequest(userId: number) {
+  async findApprovedRequest(userId: string) {
     const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-    return this.loginRequestRepository.findOne({
-      where: {
-        user: { id: userId },
-        status: 'approved',
-        createdAt: MoreThan(fifteenMinutesAgo)
-      }
-    });
+    return this.loginRequestModel.findOne({
+      user: userId,
+      status: 'approved',
+      createdAt: { $gt: fifteenMinutesAgo }
+    }).exec();
   }
 
   async getAllPending() {
-    return this.loginRequestRepository.find({
-      where: { status: 'pending' },
-      order: { createdAt: 'DESC' },
-      relations: ['user']
-    });
+    return this.loginRequestModel.find({ status: 'pending' })
+      .sort({ createdAt: -1 })
+      .populate('user')
+      .exec();
   }
 
   async getAllHistory() {
-    return this.loginRequestRepository.find({
-      where: [
-        { status: 'approved' },
-        { status: 'rejected' }
-      ],
-      order: { createdAt: 'DESC' },
-      take: 50,
-      relations: ['user']
-    });
+    return this.loginRequestModel.find({
+      status: { $in: ['approved', 'rejected'] }
+    })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .populate('user')
+      .exec();
   }
 
-  async updateRequestStatus(id: number, status: string) {
-    return this.loginRequestRepository.update(id, { status });
+  async updateRequestStatus(id: string, status: string) {
+    return this.loginRequestModel.findByIdAndUpdate(id, { status }, { new: true }).exec();
   }
 
   async validateUser(email: string, pass: string): Promise<any> {
     const user = await this.usersService.findOneByEmail(email);
-    if (user && await bcrypt.compare(pass, user.passwordHash)) {
-      const { passwordHash, ...result } = user;
+    // User might be a Mongoose document or plain object depending on findOne result
+    if (user && await bcrypt.compare(pass, (user as any).passwordHash)) {
+      const result = (user as any).toObject ? (user as any).toObject() : { ...user };
+      delete result.passwordHash;
       return result;
     }
     return null;
   }
 
   async login(user: any) {
-    const payload = { email: user.email, sub: user.id, role: user.role };
+    const payload = { email: user.email, sub: user.id || user._id, role: user.role };
     
     // Set user to online when logging in
-    await this.usersService.updateStatus(user.id, UserStatus.ONLINE);
+    await this.usersService.updateStatus(user.id || user._id, UserStatus.ONLINE);
 
     return {
       access_token: this.jwtService.sign(payload),
       user: {
-        id: user.id,
+        id: user.id || user._id,
         name: user.name,
         email: user.email,
         role: user.role
@@ -90,7 +86,7 @@ export class AuthService {
     };
   }
 
-  async logout(userId: number) {
+  async logout(userId: any) {
     return this.usersService.updateStatus(userId, UserStatus.OFFLINE);
   }
 }

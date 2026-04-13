@@ -17,7 +17,7 @@ import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ChatService } from './chat.service';
-import { MediaType } from './entities/message.entity';
+import { MediaType } from './schemas/message.schema';
 import { existsSync, mkdirSync } from 'fs';
 
 const UPLOAD_PATH = './uploads/chat';
@@ -36,19 +36,19 @@ export class ChatController {
   }
 
   @Post('conversations')
-  async startConversation(@Request() req, @Body('userId') otherUserId: number) {
+  async startConversation(@Request() req, @Body('userId') otherUserId: string) {
     return this.chatService.findOrCreateConversation(req.user.userId, otherUserId);
   }
 
   @Get('conversations/:id/messages')
   async getMessages(
-    @Param('id') conversationId: number,
+    @Param('id') conversationId: string,
     @Query('before') before: string,
-    @Query('limit') limit: number,
+    @Query('limit') limit: string,
     @Request() req,
   ) {
     return this.chatService.getMessages(
-      Number(conversationId),
+      conversationId,
       req.user.userId,
       before,
       limit ? Number(limit) : 15,
@@ -56,8 +56,8 @@ export class ChatController {
   }
 
   @Patch('conversations/:id/read')
-  async markAsRead(@Param('id') conversationId: number, @Request() req) {
-    await this.chatService.markAsRead(Number(conversationId), req.user.userId);
+  async markAsRead(@Param('id') conversationId: string, @Request() req) {
+    await this.chatService.markAsRead(conversationId, req.user.userId);
     return { success: true };
   }
 
@@ -92,7 +92,7 @@ export class ChatController {
     }),
   )
   async uploadMedia(
-    @Param('id') conversationId: number,
+    @Param('id') conversationId: string,
     @UploadedFile() file: Express.Multer.File,
     @Request() req,
   ) {
@@ -103,7 +103,7 @@ export class ChatController {
     const mediaType = file.mimetype.startsWith('image/') ? MediaType.IMAGE : MediaType.FILE;
     const mediaUrl = `/uploads/chat/${file.filename}`;
 
-    const message = await this.chatService.sendMessage(req.user.userId, Number(conversationId), {
+    const message = await this.chatService.sendMessage(req.user.userId, conversationId, {
       mediaUrl,
       mediaType,
       originalFileName: file.originalname,

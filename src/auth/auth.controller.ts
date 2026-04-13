@@ -70,6 +70,6 @@ export class AuthController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   async updateStatus(@Param('id') id: string, @Param('status') status: string) {
-    return this.authService.updateRequestStatus(+id, status);
+    return this.authService.updateRequestStatus(id, status);
   }
 }

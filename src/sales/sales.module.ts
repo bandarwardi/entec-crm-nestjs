@@ -1,10 +1,9 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { Customer } from './customer.entity';
-import { Order } from './order.entity';
-import { OrderDevice } from './order-device.entity';
-import { User } from '../users/user.entity';
-import { Lead } from '../leads/lead.entity';
+import { MongooseModule } from '@nestjs/mongoose';
+import { Customer, CustomerSchema } from './schemas/customer.schema';
+import { Order, OrderSchema } from './schemas/order.schema';
+import { Lead, LeadSchema } from '../leads/schemas/lead.schema';
+import { User, UserSchema } from '../users/schemas/user.schema';
 import { SalesService } from './sales.service';
 import { SalesController } from './sales.controller';
 import { SalesCacheCron } from './sales-cache.cron';
@@ -13,7 +12,12 @@ import { EmailModule } from '../email/email.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Customer, Order, OrderDevice, Lead, User]),
+    MongooseModule.forFeature([
+      { name: Customer.name, schema: CustomerSchema },
+      { name: Order.name, schema: OrderSchema },
+      { name: Lead.name, schema: LeadSchema },
+      { name: User.name, schema: UserSchema },
+    ]),
     EmailModule,
   ],
   providers: [SalesService, SalesCacheCron, InvoicePdfService],

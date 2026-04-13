@@ -1,7 +1,7 @@
 import { Controller, Get, Put, Post, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { WorkSettingsService } from './work-settings.service';
-import { WorkSettings } from './work-settings.entity';
-import { Holiday } from './holiday.entity';
+import { WorkSettings } from './schemas/work-settings.schema';
+import { Holiday } from './schemas/holiday.schema';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -38,7 +38,7 @@ export class WorkSettingsController {
 
   @Delete('holidays/:id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
-  async deleteHoliday(@Param('id') id: number): Promise<void> {
+  async deleteHoliday(@Param('id') id: string): Promise<void> {
     return this.workSettingsService.deleteHoliday(id);
   }
 }

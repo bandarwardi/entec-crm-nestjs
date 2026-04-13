@@ -1,47 +1,40 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
-import { User } from './user.entity';
-import { UserActivity } from './user-activity.entity';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { User, UserDocument } from './schemas/user.schema';
+import { UserActivity, UserActivityDocument } from './schemas/user-activity.schema';
 import { UserStatus } from './user-status.enum';
 import { WorkSettingsService } from '../work-settings/work-settings.service';
-import { DateTime, Interval } from 'luxon';
+import { DateTime } from 'luxon';
 
 @Injectable()
 export class PerformanceService {
   constructor(
-    @InjectRepository(User)
-    private usersRepository: Repository<User>,
-    @InjectRepository(UserActivity)
-    private activitiesRepository: Repository<UserActivity>,
+    @InjectModel(User.name)
+    private userModel: Model<UserDocument>,
+    @InjectModel(UserActivity.name)
+    private activityModel: Model<UserActivityDocument>,
     private workSettingsService: WorkSettingsService,
   ) { }
 
-  async getMonthlyPerformance(userId: number, year: number, month: number) {
-    const user = await this.usersRepository.findOne({ where: { id: userId }, select: ['id', 'name', 'email'] });
+  async getMonthlyPerformance(userId: string, year: number, month: number) {
+    const user = await this.userModel.findById(userId).select('id name email').exec();
     if (!user) return null;
 
     const settings = await this.workSettingsService.getSettings();
     const holidays = await this.workSettingsService.getHolidays();
     const timezone = settings.timezone || 'Africa/Cairo';
 
-    // Get start and end of the month in Cairo timezone
     const monthStart = DateTime.fromObject({ year, month, day: 1 }, { zone: timezone }).startOf('day');
     const monthEnd = monthStart.endOf('month');
 
-    // Fetch all activities for the user in this month (plus a buffer for the overnight shift)
-    // Shift can start on the last day of the previous month or end on the first day of the next month.
-    // To be safe, we fetch from monthStart.minus({ days: 1 }) to monthEnd.plus({ days: 1 })
-    const activities = await this.activitiesRepository.find({
-      where: {
-        user: { id: userId },
-        timestamp: Between(
-          monthStart.minus({ days: 1 }).toJSDate(),
-          monthEnd.plus({ days: 1 }).toJSDate(),
-        ),
+    const activities = await this.activityModel.find({
+      user: userId,
+      timestamp: {
+        $gte: monthStart.minus({ days: 1 }).toJSDate(),
+        $lte: monthEnd.plus({ days: 1 }).toJSDate(),
       },
-      order: { timestamp: 'ASC' },
-    });
+    }).sort({ timestamp: 1 }).exec();
 
     const days: any[] = [];
     let totals = {
@@ -55,13 +48,12 @@ export class PerformanceService {
       holidaysCount: 0,
     };
 
-    // Iterate through each day of the month
     for (let day = 1; day <= monthEnd.day; day++) {
       const currentDay = monthStart.set({ day });
-      const dayOfWeek = currentDay.weekday; // 1=Mon, 7=Sun (Luxon) -> Friday is 5.
+      const dayOfWeek = currentDay.weekday; 
       
       const holiday = holidays.find(h => 
-        (h.dayOfWeek !== null && h.dayOfWeek === (dayOfWeek % 7)) || // Adjusting for 0=Sun in DB if needed, Luxon uses 1=Mon
+        (h.dayOfWeek !== null && h.dayOfWeek === (dayOfWeek % 7)) || 
         (h.specificDate && DateTime.fromISO(h.specificDate).hasSame(currentDay, 'day'))
       );
 
@@ -76,8 +68,6 @@ export class PerformanceService {
         continue;
       }
 
-      // Calculate shift start and end for this day
-      // Shift starts at 10 PM of currentDay and ends at 6 AM of nextDay
       const shiftStart = currentDay.set({
         hour: settings.shiftStartHour,
         minute: settings.shiftStartMinute,
@@ -91,7 +81,6 @@ export class PerformanceService {
         minutes: settings.shiftEndMinute - settings.shiftStartMinute
       });
 
-      // Filter activities for this shift
       const shiftActivities = activities.filter(a => {
         const ts = DateTime.fromJSDate(a.timestamp).setZone(timezone);
         return ts >= shiftStart && ts <= shiftEnd;
@@ -108,17 +97,15 @@ export class PerformanceService {
         continue;
       }
 
-      // Calculate durations
       let activeMinutes = 0;
       let busyMinutes = 0;
       let breakMinutes = 0;
       let lateMinutes = 0;
 
-      // Late calculation: if first activity is after shiftStart
       const firstActivity = shiftActivities[0];
       const firstTs = DateTime.fromJSDate(firstActivity.timestamp).setZone(timezone);
       if (firstActivity.status === UserStatus.ONLINE || firstActivity.status === UserStatus.BUSY || firstActivity.status === UserStatus.BREAK) {
-        if (firstTs > shiftStart.plus({ minutes: 5 })) { // 5 mins grace period maybe? No, let's be strict or as requested
+        if (firstTs > shiftStart.plus({ minutes: 5 })) { 
           lateMinutes = Math.floor(firstTs.diff(shiftStart, 'minutes').minutes);
         }
       }
@@ -129,7 +116,7 @@ export class PerformanceService {
         const currentTs = DateTime.fromJSDate(current.timestamp).setZone(timezone);
         const nextTs = next 
           ? DateTime.fromJSDate(next.timestamp).setZone(timezone)
-          : shiftEnd; // Use shiftEnd if it's the last activity
+          : shiftEnd; 
 
         const duration = Math.max(0, Math.floor(nextTs.diff(currentTs, 'minutes').minutes));
 
@@ -174,8 +161,8 @@ export class PerformanceService {
     };
   }
 
-  async getDailyPerformance(userId: number, date: string) {
-    const user = await this.usersRepository.findOne({ where: { id: userId }, select: ['id', 'name', 'email'] });
+  async getDailyPerformance(userId: string, date: string) {
+    const user = await this.userModel.findById(userId).select('id name email').exec();
     if (!user) return null;
 
     const settings = await this.workSettingsService.getSettings();
@@ -195,13 +182,13 @@ export class PerformanceService {
       minutes: settings.shiftEndMinute - settings.shiftStartMinute
     });
 
-    const activities = await this.activitiesRepository.find({
-      where: {
-        user: { id: userId },
-        timestamp: Between(shiftStart.toJSDate(), shiftEnd.toJSDate()),
+    const activities = await this.activityModel.find({
+      user: userId,
+      timestamp: {
+        $gte: shiftStart.toJSDate(),
+        $lte: shiftEnd.toJSDate(),
       },
-      order: { timestamp: 'ASC' },
-    });
+    }).sort({ timestamp: 1 }).exec();
 
     let activeMinutes = 0;
     let busyMinutes = 0;
@@ -222,13 +209,16 @@ export class PerformanceService {
       else if (activity.status === UserStatus.BREAK) breakMinutes += duration;
 
       return {
-        ...activity,
+        _id: activity._id,
+        user: activity.user,
+        status: activity.status,
+        breakReason: activity.breakReason,
+        notes: activity.notes,
         timestamp: currentTs.toISO(),
         duration,
       };
     });
 
-    // Late calculation
     if (activities.length > 0) {
       const firstActivity = activities[0];
       const firstTs = DateTime.fromJSDate(firstActivity.timestamp).setZone(timezone);

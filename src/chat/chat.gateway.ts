@@ -21,7 +21,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  private activeUsers = new Map<number, string>(); // userId -> socketId
+  private activeUsers = new Map<string, string>(); // userId -> socketId
 
   constructor(
     private readonly jwtService: JwtService,
@@ -65,16 +65,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('sendMessage')
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { conversationId: number; content?: string; mediaUrl?: string; mediaType?: any; originalFileName?: string },
+    @MessageBody() data: { conversationId: string; content?: string; mediaUrl?: string; mediaType?: any; originalFileName?: string },
   ) {
     const userId = this.getUserIdFromSocket(client);
     if (!userId) return;
 
     const message = await this.chatService.sendMessage(userId, data.conversationId, data);
     
-    // Find the other user in the conversation to notify them
-    const conversation = await this.chatService.findOrCreateConversation(userId, userId); // This is just to get the conv, but we already have it
-    // Actually, it's better to get the conversation from the DB to find the other user
     const conv = await this.chatService.getUserConversations(userId);
     const targetConv = conv.find(c => c.id === data.conversationId);
     
@@ -88,7 +85,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('typing')
   handleTyping(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { conversationId: number; recipientId: number; isTyping: boolean },
+    @MessageBody() data: { conversationId: string; recipientId: string; isTyping: boolean },
   ) {
     const userId = this.getUserIdFromSocket(client);
     if (!userId) return;
@@ -103,7 +100,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('markAsRead')
   async handleMarkAsRead(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { conversationId: number; recipientId: number },
+    @MessageBody() data: { conversationId: string; recipientId: string },
   ) {
     const userId = this.getUserIdFromSocket(client);
     if (!userId) return;
@@ -115,7 +112,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
-  private getUserIdFromSocket(client: Socket): number | null {
+  private getUserIdFromSocket(client: Socket): string | null {
     for (const [userId, socketId] of this.activeUsers.entries()) {
       if (socketId === client.id) return userId;
     }

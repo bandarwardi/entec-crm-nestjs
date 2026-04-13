@@ -1,12 +1,11 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, DataSource, Between, MoreThanOrEqual } from 'typeorm';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import { CacheService } from '../common/cache.service';
-import { Customer } from './customer.entity';
-import { Order } from './order.entity';
-import { OrderDevice } from './order-device.entity';
-import { Lead } from '../leads/lead.entity';
-import { User } from '../users/user.entity';
+import { Customer, CustomerDocument } from './schemas/customer.schema';
+import { Order, OrderDocument } from './schemas/order.schema';
+import { Lead, LeadDocument } from '../leads/schemas/lead.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
 import { CreateCustomerDto, UpdateCustomerDto, CreateOrderDto, UpdateOrderDto, QueryOrdersDto, QueryCustomersDto, DashboardQueryDto } from './sales.dto';
 import { OrderStatus } from './order-status.enum';
 import { EmailService } from '../email/email.service';
@@ -15,17 +14,14 @@ import { InvoicePdfService } from './invoice-pdf.service';
 @Injectable()
 export class SalesService {
   constructor(
-    @InjectRepository(Customer)
-    private customerRepository: Repository<Customer>,
-    @InjectRepository(Order)
-    private orderRepository: Repository<Order>,
-    @InjectRepository(OrderDevice)
-    private deviceRepository: Repository<OrderDevice>,
-    @InjectRepository(Lead)
-    private leadRepository: Repository<Lead>,
-    @InjectRepository(User)
-    private userRepository: Repository<User>,
-    private dataSource: DataSource,
+    @InjectModel(Customer.name)
+    private customerModel: Model<CustomerDocument>,
+    @InjectModel(Order.name)
+    private orderModel: Model<OrderDocument>,
+    @InjectModel(Lead.name)
+    private leadModel: Model<LeadDocument>,
+    @InjectModel(User.name)
+    private userModel: Model<UserDocument>,
     private cacheService: CacheService,
     private emailService: EmailService,
     private invoicePdfService: InvoicePdfService,
@@ -37,66 +33,72 @@ export class SalesService {
     const { page = 1, limit = 10, search } = query;
     const skip = (page - 1) * limit;
 
-    const where = search ? [
-      { name: Like(`%${search}%`) },
-      { phone: Like(`%${search}%`) },
-      { email: Like(`%${search}%`) }
-    ] : {};
+    const filter: any = {};
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
 
-    const [data, total] = await this.customerRepository.findAndCount({
-      where,
-      order: { createdAt: 'DESC' },
-      take: limit,
-      skip,
-    });
+    const data = await this.customerModel.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .exec();
+
+    const total = await this.customerModel.countDocuments(filter).exec();
 
     return { data, total, page, limit };
   }
 
-  async findOneCustomer(id: number) {
-    const customer = await this.customerRepository.findOne({
-      where: { id },
-      relations: ['orders', 'orders.devices'],
-    });
+  async findOneCustomer(id: string) {
+    const customer = await this.customerModel.findById(id).exec();
     if (!customer) throw new NotFoundException('العميل غير موجود');
-    return customer;
+    
+    // In SQL we had relations: ['orders', 'orders.devices']
+    // In Mongo we can find orders separately or use aggregate
+    const orders = await this.orderModel.find({ customer: id }).exec();
+    
+    const result = customer.toObject() as any;
+    result.orders = orders;
+    return result;
   }
 
   async createCustomer(dto: CreateCustomerDto) {
-    const existing = await this.customerRepository.findOne({ where: { phone: dto.phone } });
+    const existing = await this.customerModel.findOne({ phone: dto.phone }).exec();
     if (existing) throw new BadRequestException('العميل برقم الهاتف هذا موجود بالفعل');
 
     const coords = await this.geocode(dto.address, dto.state);
-    const customer = this.customerRepository.create({
+    const customer = new this.customerModel({
       ...dto,
       latitude: coords?.latitude || dto.latitude,
       longitude: coords?.longitude || dto.longitude,
     });
-    return this.customerRepository.save(customer);
+    return customer.save();
   }
 
-  async updateCustomer(id: number, dto: UpdateCustomerDto) {
-    const customer = await this.findOneCustomer(id);
+  async updateCustomer(id: string, dto: UpdateCustomerDto) {
+    const customer = await this.customerModel.findById(id).exec();
+    if (!customer) throw new NotFoundException('العميل غير موجود');
     
-    // Check phone uniqueness if changed
     if (dto.phone && dto.phone !== customer.phone) {
-        const existing = await this.customerRepository.findOne({ where: { phone: dto.phone } });
+        const existing = await this.customerModel.findOne({ phone: dto.phone }).exec();
         if (existing) throw new BadRequestException('العميل برقم الهاتف هذا موجود بالفعل');
     }
 
-    // If address changed, re-geocode
     if (dto.address !== customer.address || dto.state !== customer.state) {
         const coords = await this.geocode(dto.address, dto.state);
         if (coords) {
-            dto.latitude = coords.latitude;
-            dto.longitude = coords.longitude;
+            (dto as any).latitude = coords.latitude;
+            (dto as any).longitude = coords.longitude;
         }
     }
 
-    Object.assign(customer, dto);
-    const saved = await this.customerRepository.save(customer);
+    const updated = await this.customerModel.findByIdAndUpdate(id, dto, { new: true }).exec();
     await this.invalidateDashboardCache();
-    return saved;
+    return updated;
   }
 
   // --- Orders ---
@@ -105,121 +107,151 @@ export class SalesService {
     const { page = 1, limit = 10, search, status, type } = query;
     const skip = (page - 1) * limit;
 
-    const queryBuilder = this.orderRepository.createQueryBuilder('order')
-      .leftJoinAndSelect('order.customer', 'customer')
-      .leftJoinAndSelect('order.leadAgent', 'leadAgent')
-      .leftJoinAndSelect('order.closerAgent', 'closerAgent')
-      .loadRelationCountAndMap('order.deviceCount', 'order.devices');
+    // Search by customer name requires $lookup or searching in objects
+    // For simplicity, we filter orders and then search customer if needed, 
+    // but better to use aggregate for full search capability.
+    
+    const filter: any = {};
+    if (status) filter.status = status;
+    if (type) filter.type = type;
 
-    if (status) queryBuilder.andWhere('order.status = :status', { status });
-    if (type) queryBuilder.andWhere('order.type = :type', { type });
+    // Use aggregate for search by customer name
     if (search) {
-      queryBuilder.andWhere('(customer.name Like :search OR order.notes Like :search)', { search: `%${search}%` });
+        const pipeline: any[] = [
+            { $lookup: { from: 'customers', localField: 'customer', foreignField: '_id', as: 'customerData' } },
+            { $unwind: '$customerData' },
+            { 
+              $match: {
+                $or: [
+                    { 'customerData.name': { $regex: search, $options: 'i' } },
+                    { notes: { $regex: search, $options: 'i' } }
+                ],
+                ...filter
+              } 
+            },
+            { $sort: { createdAt: -1 } },
+            { $skip: skip },
+            { $limit: limit },
+            { $lookup: { from: 'users', localField: 'leadAgent', foreignField: '_id', as: 'leadAgent' } },
+            { $lookup: { from: 'users', localField: 'closerAgent', foreignField: '_id', as: 'closerAgent' } },
+            { $unwind: { path: '$leadAgent', preserveNullAndEmptyArrays: true } },
+            { $unwind: { path: '$closerAgent', preserveNullAndEmptyArrays: true } },
+            { $addFields: { customer: '$customerData' } },
+            { $project: { customerData: 0 } }
+        ];
+
+        const data = await this.orderModel.aggregate(pipeline).exec();
+        
+        // Count for search
+        const totalPipeline = [
+            { $lookup: { from: 'customers', localField: 'customer', foreignField: '_id', as: 'customerData' } },
+            { $unwind: '$customerData' },
+            { 
+              $match: {
+                $or: [
+                    { 'customerData.name': { $regex: search, $options: 'i' } },
+                    { notes: { $regex: search, $options: 'i' } }
+                ],
+                ...filter
+              } 
+            },
+            { $count: 'total' }
+        ];
+        const totalResult = await this.orderModel.aggregate(totalPipeline).exec();
+        const total = totalResult.length > 0 ? totalResult[0].total : 0;
+
+        return { data, total, page, limit };
     }
 
-    const [data, total] = await queryBuilder
-      .orderBy('order.createdAt', 'DESC')
-      .take(limit)
+    const data = await this.orderModel.find(filter)
+      .populate('customer leadAgent closerAgent')
+      .sort({ createdAt: -1 })
       .skip(skip)
-      .getManyAndCount();
+      .limit(limit)
+      .exec();
+
+    const total = await this.orderModel.countDocuments(filter).exec();
 
     return { data, total, page, limit };
   }
 
-  async findOneOrder(id: number) {
-    const order = await this.orderRepository.findOne({
-      where: { id },
-      relations: ['customer', 'leadAgent', 'closerAgent', 'devices'],
-    });
+  async findOneOrder(id: string) {
+    const order = await this.orderModel.findById(id)
+      .populate('customer leadAgent closerAgent')
+      .exec();
     if (!order) throw new NotFoundException('الطلب غير موجود');
     return order;
   }
 
   async createOrder(dto: CreateOrderDto) {
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-
-    try {
-      // Existence check for agents
-      const leadAgent = await this.userRepository.findOne({ where: { id: dto.leadAgentId } });
-      const closerAgent = await this.userRepository.findOne({ where: { id: dto.closerAgentId } });
-
-      if (!leadAgent) {
-        throw new NotFoundException('الموظف الذي جلب العميل غير موجود');
-      }
-      if (!closerAgent) {
-        throw new NotFoundException('الموظف الذي أغلق الطلب غير موجود');
-      }
-
-      let customerId = dto.customerId;
-
-      // Handle new customer
-      if (dto.newCustomer) {
-        const existing = await this.customerRepository.findOne({ where: { phone: dto.newCustomer.phone } });
-        if (existing) throw new BadRequestException('العميل برقم الهاتف هذا موجود بالفعل');
-
-        const coords = await this.geocode(dto.newCustomer.address, dto.newCustomer.state);
-        const newCustomer = this.customerRepository.create({
-          ...dto.newCustomer,
-          latitude: coords?.latitude || dto.newCustomer.latitude,
-          longitude: coords?.longitude || dto.newCustomer.longitude,
-        });
-        const savedCustomer = await queryRunner.manager.save(newCustomer);
-        customerId = savedCustomer.id;
-      }
-
-      if (!customerId) throw new BadRequestException('يجب تحديد عميل أو إدخال بيانات عميل جديد');
-
-      const order = this.orderRepository.create({
-        ...dto,
-        customer: { id: customerId } as any,
-        leadAgent: { id: dto.leadAgentId } as any,
-        closerAgent: { id: dto.closerAgentId } as any,
-        devices: dto.devices || [],
-      });
-
-      const savedOrder = await queryRunner.manager.save(order);
-      await queryRunner.commitTransaction();
-      await this.invalidateDashboardCache();
-      return savedOrder;
-    } catch (err) {
-      await queryRunner.rollbackTransaction();
-      throw err;
-    } finally {
-      await queryRunner.release();
-    }
-  }
-
-  async updateOrder(id: number, dto: UpdateOrderDto) {
-    const order = await this.findOneOrder(id);
-
     // Existence check for agents
-    const leadAgent = await this.userRepository.findOne({ where: { id: dto.leadAgentId } });
-    const closerAgent = await this.userRepository.findOne({ where: { id: dto.closerAgentId } });
+    const leadAgent = await this.userModel.findById(dto.leadAgentId).exec();
+    const closerAgent = await this.userModel.findById(dto.closerAgentId).exec();
 
     if (!leadAgent) {
-        throw new NotFoundException('الموظف الذي جلب العميل غير موجود');
+      throw new NotFoundException('الموظف الذي جلب العميل غير موجود');
     }
     if (!closerAgent) {
-        throw new NotFoundException('الموظف الذي أغلق الطلب غير موجود');
+      throw new NotFoundException('الموظف الذي أغلق الطلب غير موجود');
     }
 
-    Object.assign(order, {
+    let customerId = dto.customerId ? new Types.ObjectId(dto.customerId) : null;
+
+    // Handle new customer
+    if (dto.newCustomer) {
+      const existing = await this.customerModel.findOne({ phone: dto.newCustomer.phone }).exec();
+      if (existing) throw new BadRequestException('العميل برقم الهاتف هذا موجود بالفعل');
+
+      const coords = await this.geocode(dto.newCustomer.address, dto.newCustomer.state);
+      const newCustomer = new this.customerModel({
+        ...dto.newCustomer,
+        latitude: coords?.latitude || dto.newCustomer.latitude,
+        longitude: coords?.longitude || dto.newCustomer.longitude,
+      });
+      const savedCustomer = await newCustomer.save();
+      customerId = savedCustomer._id as Types.ObjectId;
+    }
+
+    if (!customerId) throw new BadRequestException('يجب تحديد عميل أو إدخال بيانات عميل جديد');
+
+    const order = new this.orderModel({
       ...dto,
-      leadAgent: { id: dto.leadAgentId } as any,
-      closerAgent: { id: dto.closerAgentId } as any,
+      customer: customerId,
+      leadAgent: new Types.ObjectId(dto.leadAgentId),
+      closerAgent: new Types.ObjectId(dto.closerAgentId),
+      devices: dto.devices || [],
     });
-    const saved = await this.orderRepository.save(order);
+
+    const savedOrder = await order.save();
     await this.invalidateDashboardCache();
-    return saved;
+    return savedOrder;
   }
 
-  async removeOrder(id: number) {
-    const order = await this.findOneOrder(id);
-    const removed = await this.orderRepository.remove(order);
+  async updateOrder(id: string, dto: UpdateOrderDto) {
+    const order = await this.orderModel.findById(id).exec();
+    if (!order) throw new NotFoundException('الطلب غير موجود');
+
+    const leadAgent = await this.userModel.findById(dto.leadAgentId).exec();
+    const closerAgent = await this.userModel.findById(dto.closerAgentId).exec();
+
+    if (!leadAgent) throw new NotFoundException('الموظف الذي جلب العميل غير موجود');
+    if (!closerAgent) throw new NotFoundException('الموظف الذي أغلق الطلب غير موجود');
+
+    const updated = await this.orderModel.findByIdAndUpdate(id, {
+      ...dto,
+      leadAgent: new Types.ObjectId(dto.leadAgentId),
+      closerAgent: new Types.ObjectId(dto.closerAgentId),
+    }, { new: true }).exec();
+
     await this.invalidateDashboardCache();
-    return removed;
+    return updated;
+  }
+
+  async removeOrder(id: string) {
+    const result = await this.orderModel.findByIdAndDelete(id).exec();
+    if (!result) throw new NotFoundException('الطلب غير موجود');
+    await this.invalidateDashboardCache();
+    return { success: true };
   }
 
   // --- Geocoding Helpers ---
@@ -259,7 +291,6 @@ export class SalesService {
 
     const stats = await this.computeDashboardStats(period);
     
-    // Cache for 5 minutes by default
     await this.cacheService.set(cacheKey, stats, 300);
     
     return stats;
@@ -270,10 +301,8 @@ export class SalesService {
     for (const period of periods) {
       try {
         const stats = await this.computeDashboardStats(period);
-        await this.cacheService.set(`dashboard:stats:${period}`, stats, 600); // 10 minutes cache
-      } catch (error) {
-        // Only log if it's not a connection issue (already handled by CacheService)
-      }
+        await this.cacheService.set(`dashboard:stats:${period}`, stats, 600);
+      } catch (error) { }
     }
   }
 
@@ -289,110 +318,105 @@ export class SalesService {
       startDate = new Date(now.getFullYear(), 0, 1);
       prevStartDate = new Date(now.getFullYear() - 1, 0, 1);
     } else if (period === 'all') {
-      startDate = new Date(2020, 0, 1); // System inception
+      startDate = new Date(2020, 0, 1);
       prevStartDate = new Date(2020, 0, 1);
     } else {
-      // default 30days
       startDate.setDate(now.getDate() - 30);
       prevStartDate.setDate(now.getDate() - 60);
     }
 
     // KPIs
-    const totalOrders = await this.orderRepository.count({ where: { createdAt: MoreThanOrEqual(startDate) } });
-    const prevOrders = await this.orderRepository.count({ where: { createdAt: Between(prevStartDate, startDate) } });
+    const totalOrders = await this.orderModel.countDocuments({ createdAt: { $gte: startDate } }).exec();
+    const prevOrders = await this.orderModel.countDocuments({ createdAt: { $gte: prevStartDate, $lt: startDate } }).exec();
 
-    const revenueResult = await this.orderRepository.createQueryBuilder('order')
-      .select('SUM(order.amount)', 'total')
-      .where('order.status = :status', { status: OrderStatus.COMPLETED })
-      .andWhere('order.createdAt >= :startDate', { startDate })
-      .getRawOne();
+    const revenueResultArr = await this.orderModel.aggregate([
+      { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: startDate } } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]).exec();
+    const revenueResult = revenueResultArr[0] || { total: 0 };
     
-    const prevRevenueResult = await this.orderRepository.createQueryBuilder('order')
-      .select('SUM(order.amount)', 'total')
-      .where('order.status = :status', { status: OrderStatus.COMPLETED })
-      .andWhere('order.createdAt BETWEEN :prevStart AND :startDate', { prevStart: prevStartDate, startDate })
-      .getRawOne();
+    const prevRevenueResultArr = await this.orderModel.aggregate([
+      { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: prevStartDate, $lt: startDate } } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]).exec();
+    const prevRevenueResult = prevRevenueResultArr[0] || { total: 0 };
 
-    const totalCustomers = await this.customerRepository.count({ where: { createdAt: MoreThanOrEqual(startDate) } });
-    const prevCustomers = await this.customerRepository.count({ where: { createdAt: Between(prevStartDate, startDate) } });
+    const totalCustomers = await this.customerModel.countDocuments({ createdAt: { $gte: startDate } }).exec();
+    const prevCustomers = await this.customerModel.countDocuments({ createdAt: { $gte: prevStartDate, $lt: startDate } }).exec();
 
-    const totalLeads = await this.leadRepository.count({ where: { createdAt: MoreThanOrEqual(startDate) } });
-    const prevLeads = await this.leadRepository.count({ where: { createdAt: Between(prevStartDate, startDate) } });
+    const totalLeads = await this.leadModel.countDocuments({ createdAt: { $gte: startDate } }).exec();
+    const prevLeads = await this.leadModel.countDocuments({ createdAt: { $gte: prevStartDate, $lt: startDate } }).exec();
 
-    // Recent Orders (5)
-    const recentOrders = await this.orderRepository.find({
-      relations: ['customer'],
-      order: { createdAt: 'DESC' },
-      take: 5
-    });
+    const recentOrders = await this.orderModel.find()
+      .populate('customer', 'name')
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .exec();
 
-    // Revenue by Month (Last 12)
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setMonth(now.getMonth() - 11);
     twelveMonthsAgo.setDate(1);
 
-    const revenueByMonth = await this.orderRepository.createQueryBuilder('order')
-      .select("DATE_FORMAT(order.createdAt, '%Y-%m')", 'month')
-      .addSelect('SUM(order.amount)', 'revenue')
-      .where('order.status = :status', { status: OrderStatus.COMPLETED })
-      .andWhere('order.createdAt >= :twelveMonthsAgo', { twelveMonthsAgo })
-      .groupBy('month')
-      .orderBy('month', 'ASC')
-      .getRawMany();
+    const revenueByMonth = await this.orderModel.aggregate([
+      { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: twelveMonthsAgo } } },
+      { $group: {
+          _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } },
+          revenue: { $sum: '$amount' }
+      }},
+      { $sort: { _id: 1 } },
+      { $project: { month: '$_id', revenue: 1, _id: 0 } }
+    ]).exec();
 
-    // Top Agents
-    const topAgents = await this.orderRepository.createQueryBuilder('order')
-      .leftJoin('order.closerAgent', 'agent')
-      .select('agent.name', 'name')
-      .addSelect('SUM(order.amount)', 'totalRevenue')
-      .addSelect('COUNT(order.id)', 'orderCount')
-      .where('order.status = :status', { status: OrderStatus.COMPLETED })
-      .andWhere('order.createdAt >= :startDate', { startDate })
-      .groupBy('agent.id')
-      .orderBy('totalRevenue', 'DESC')
-      .limit(5)
-      .getRawMany();
+    const topAgents = await this.orderModel.aggregate([
+      { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: startDate } } },
+      { $group: {
+          _id: '$closerAgent',
+          totalRevenue: { $sum: '$amount' },
+          orderCount: { $sum: 1 }
+      }},
+      { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'agent' } },
+      { $unwind: '$agent' },
+      { $project: { name: '$agent.name', totalRevenue: 1, orderCount: 1, _id: 0 } },
+      { $sort: { totalRevenue: -1 } },
+      { $limit: 5 }
+    ]).exec();
 
-    // Distribution
-    const ordersByType = await this.orderRepository.createQueryBuilder('order')
-      .select('order.type', 'type')
-      .addSelect('COUNT(*)', 'count')
-      .andWhere('order.createdAt >= :startDate', { startDate })
-      .groupBy('order.type')
-      .getRawMany();
+    const ordersByType = await this.orderModel.aggregate([
+      { $match: { createdAt: { $gte: startDate } } },
+      { $group: { _id: '$type', count: { $sum: 1 } } },
+      { $project: { type: '$_id', count: 1, _id: 0 } }
+    ]).exec();
     
-    const leadsFunnel = await this.leadRepository.createQueryBuilder('lead')
-      .select('lead.status', 'status')
-      .addSelect('COUNT(*)', 'count')
-      .andWhere('lead.createdAt >= :startDate', { startDate })
-      .groupBy('lead.status')
-      .getRawMany();
+    const leadsFunnel = await this.leadModel.aggregate([
+      { $match: { createdAt: { $gte: startDate } } },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+      { $project: { status: '$_id', count: 1, _id: 0 } }
+    ]).exec();
 
-    // Top States (New)
-    const topStates = await this.orderRepository.createQueryBuilder('order')
-      .leftJoin('order.customer', 'customer')
-      .select('customer.state', 'name')
-      .addSelect('COUNT(order.id)', 'count')
-      .where('order.createdAt >= :startDate', { startDate })
-      .groupBy('customer.state')
-      .orderBy('count', 'DESC')
-      .limit(5)
-      .getRawMany();
+    const topStates = await this.orderModel.aggregate([
+      { $match: { createdAt: { $gte: startDate } } },
+      { $lookup: { from: 'customers', localField: 'customer', foreignField: '_id', as: 'customerData' } },
+      { $unwind: '$customerData' },
+      { $group: { _id: '$customerData.state', count: { $sum: 1 } } },
+      { $project: { name: '$_id', count: 1, _id: 0 } },
+      { $sort: { count: -1 } },
+      { $limit: 5 }
+    ]).exec();
 
     return {
       kpis: {
         totalOrders,
         prevOrders,
-        totalRevenue: parseFloat(revenueResult.total || 0),
-        prevRevenue: parseFloat(prevRevenueResult.total || 0),
+        totalRevenue: revenueResult.total,
+        prevRevenue: prevRevenueResult.total,
         totalCustomers,
         prevCustomers,
         totalLeads,
         prevLeads
       },
       recentOrders: recentOrders.map(o => ({
-        id: o.id,
-        customerName: o.customer.name,
+        id: o._id,
+        customerName: (o.customer as any)?.name || 'N/A',
         amount: o.amount,
         status: o.status,
         createdAt: o.createdAt
@@ -403,37 +427,31 @@ export class SalesService {
       leadsFunnel,
       topStates: topStates.filter(s => s.name).map(s => ({
         name: s.name,
-        count: parseInt(s.count)
+        count: s.count
       }))
     };
   }
 
-  async sendInvoiceToCustomerEmail(orderId: number) {
-    const order = await this.orderRepository.findOne({
-      where: { id: orderId },
-      relations: ['customer', 'devices', 'leadAgent', 'closerAgent'],
-    });
+  async sendInvoiceToCustomerEmail(orderId: string) {
+    const order = await this.orderModel.findById(orderId)
+      .populate('customer leadAgent closerAgent')
+      .exec();
 
-    if (!order) {
-      throw new NotFoundException('Order not found');
-    }
-
-    if (!order.customer.email) {
-      throw new BadRequestException('Customer does not have an email address');
-    }
+    if (!order) throw new NotFoundException('Order not found');
+    if (!(order.customer as any).email) throw new BadRequestException('Customer does not have an email address');
 
     const pdfBuffer = await this.invoicePdfService.generateInvoiceBuffer(order);
 
-    const subject = `Invoice for Order #${order.id} - EN TEC`;
-    const text = `Dear ${order.customer.name},\n\nPlease find attached the invoice for your order #${order.id}.\n\nThank you for your business!`;
+    const subject = `Invoice for Order #${order._id} - EN TEC`;
+    const text = `Dear ${(order.customer as any).name},\n\nPlease find attached the invoice for your order #${order._id}.\n\nThank you for your business!`;
 
-    await this.emailService.sendMail(order.customer.email, subject, text, [
+    await this.emailService.sendMail((order.customer as any).email, subject, text, [
       {
-        filename: `Invoice-INV-${order.id}.pdf`,
+        filename: `Invoice-INV-${order._id}.pdf`,
         content: pdfBuffer,
       },
     ]);
 
-    return { success: true, email: order.customer.email };
+    return { success: true, email: (order.customer as any).email };
   }
 }

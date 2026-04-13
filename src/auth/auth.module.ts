@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { LoginRequest } from './login-request.entity';
+import { MongooseModule } from '@nestjs/mongoose';
+import { LoginRequest, LoginRequestSchema } from './schemas/login-request.schema';
 import { UsersModule } from '../users/users.module';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
@@ -13,7 +13,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
   imports: [
     UsersModule,
     PassportModule,
-    TypeOrmModule.forFeature([LoginRequest]),
+    MongooseModule.forFeature([{ name: LoginRequest.name, schema: LoginRequestSchema }]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -28,4 +28,3 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
   exports: [AuthService],
 })
 export class AuthModule {}
-

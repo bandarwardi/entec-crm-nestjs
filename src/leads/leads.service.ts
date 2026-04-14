@@ -23,10 +23,20 @@ export class LeadsService {
     if (hasReminder === 'true') filter.reminderAt = { $ne: null };
     if (hasReminder === 'false') filter.reminderAt = null;
 
+    console.log('Leads: User making request:', JSON.stringify(user));
+    const currentUserId = user.userId || user.id;
+
     // Restriction for Agents
     if (user.role === 'agent') {
-      filter.createdBy = new Types.ObjectId(user.userId);
+      if (!currentUserId) {
+        console.error('Leads Error: Agent userId is missing in request context!');
+      } else {
+        filter.createdBy = new Types.ObjectId(currentUserId);
+        console.log('Leads: Applying agent filter for user:', currentUserId);
+      }
     }
+
+    console.log('Leads: Query filter:', JSON.stringify(filter));
 
     if (search) {
       filter.$or = [
@@ -53,11 +63,13 @@ export class LeadsService {
   }
 
   async create(dto: CreateLeadDto, user: any) {
+    console.log('Leads: Creating lead for user:', JSON.stringify(user));
     const lead = new this.leadModel({
       ...dto,
       createdBy: new Types.ObjectId(user.userId),
     });
     const saved = await lead.save();
+    console.log('Leads: Saved lead with createdBy:', saved.createdBy);
     await this.cacheService.invalidateByPattern('dashboard:stats:*');
     
     // Populate the creator details before returning to frontend

@@ -54,18 +54,23 @@ export class InvoicePdfService {
     const html = template(data);
 
     // Launch puppeteer
+    console.log(`[Invoice] Launching Puppeteer browser...`);
     const browser = await puppeteer.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
 
     try {
+      console.log(`[Invoice] Opening new page...`);
       const page = await browser.newPage();
       
       // We set landscape: true in pdf options because the template is 297x210mm
       await page.setViewport({ width: 1122, height: 794 }); // A4 at 96 DPI
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-
+      
+      console.log(`[Invoice] Setting page content...`);
+      await page.setContent(html, { waitUntil: 'networkidle2', timeout: 30000 });
+      
+      console.log(`[Invoice] Generating PDF...`);
       const pdfBuffer = await page.pdf({
         format: 'A4',
         printBackground: true,
@@ -79,8 +84,13 @@ export class InvoicePdfService {
         },
       });
 
+      console.log(`[Invoice] PDF generation successful`);
       return Buffer.from(pdfBuffer);
+    } catch (err) {
+      console.error(`[Invoice] Error during Puppeteer operation:`, err);
+      throw err;
     } finally {
+      console.log(`[Invoice] Closing browser...`);
       await browser.close();
     }
   }

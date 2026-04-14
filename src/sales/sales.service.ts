@@ -467,26 +467,50 @@ export class SalesService {
   }
 
   async sendInvoiceToCustomerEmail(orderId: string) {
+    console.log(`[Invoice] Starting invoice send process for Order #${orderId}`);
     const order = await this.orderModel.findById(orderId)
       .populate('customer leadAgent closerAgent')
       .exec();
 
-    if (!order) throw new NotFoundException('Order not found');
-    if (!(order.customer as any).email) throw new BadRequestException('Customer does not have an email address');
+    if (!order) {
+      console.error(`[Invoice] Order #${orderId} not found`);
+      throw new NotFoundException('Order not found');
+    }
+    
+    const customerEmail = (order.customer as any).email;
+    if (!customerEmail) {
+      console.error(`[Invoice] Customer ${(order.customer as any).name} has no email`);
+      throw new BadRequestException('Customer does not have an email address');
+    }
 
+    console.log(`[Invoice] Generating PDF buffer...`);
     const settings = await this.getInvoiceSettings();
-    const pdfBuffer = await this.invoicePdfService.generateInvoiceBuffer(order, settings);
+    let pdfBuffer: Buffer;
+    try {
+      pdfBuffer = await this.invoicePdfService.generateInvoiceBuffer(order, settings);
+      console.log(`[Invoice] PDF buffer generated successfully (Size: ${pdfBuffer.length} bytes)`);
+    } catch (pdfError) {
+      console.error(`[Invoice] PDF generation FAILED:`, pdfError);
+      throw new Error(`Failed to generate PDF: ${pdfError.message}`);
+    }
 
     const subject = `Invoice for Order #${order._id} - EN TEC`;
     const text = `Dear ${(order.customer as any).name},\n\nPlease find attached the invoice for your order #${order._id}.\n\nThank you for your business!`;
 
-    await this.emailService.sendMail((order.customer as any).email, subject, text, [
-      {
-        filename: `Invoice-INV-${order._id}.pdf`,
-        content: pdfBuffer,
-      },
-    ]);
+    console.log(`[Invoice] Sending email to ${customerEmail}...`);
+    try {
+      await this.emailService.sendMail(customerEmail, subject, text, [
+        {
+          filename: `Invoice-INV-${order._id}.pdf`,
+          content: pdfBuffer,
+        },
+      ]);
+      console.log(`[Invoice] Email sent SUCCESSFULLY to ${customerEmail}`);
+    } catch (emailError) {
+      console.error(`[Invoice] Email sending FAILED to ${customerEmail}:`, emailError);
+      throw new Error(`Failed to send email: ${emailError.message}`);
+    }
 
-    return { success: true, email: (order.customer as any).email };
+    return { success: true, email: customerEmail };
   }
 }

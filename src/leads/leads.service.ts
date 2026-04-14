@@ -95,13 +95,18 @@ export class LeadsService {
     const now = new Date();
     const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
 
-    return this.leadModel.find({
+    console.log(`Notifications: Fetching reminders for user ${userId} up to ${oneHourFromNow.toISOString()}`);
+
+    const reminders = await this.leadModel.find({
       createdBy: new Types.ObjectId(userId),
       reminderRead: false,
       reminderAt: {
         $lte: oneHourFromNow
       },
     }).sort({ reminderAt: 1 }).exec();
+
+    console.log(`Notifications: Found ${reminders.length} pending reminders`);
+    return reminders;
   }
 
   async markRemindersAsRead(userId: string) {
@@ -120,7 +125,7 @@ export class LeadsService {
     const skip = (page - 1) * limit;
 
     const filter = {
-      createdBy: userId,
+      createdBy: new Types.ObjectId(userId),
       reminderAt: { $ne: null }
     };
 

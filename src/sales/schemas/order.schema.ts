@@ -47,7 +47,7 @@ export class Order {
   @Prop()
   notes: string;
 
-  @Prop({ type: String, enum: OrderStatus, default: OrderStatus.PENDING })
+  @Prop({ type: String, enum: OrderStatus, default: OrderStatus.COMPLETED })
   status: OrderStatus;
 
   @Prop({ type: [OrderDeviceSchema] })

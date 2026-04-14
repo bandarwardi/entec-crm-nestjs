@@ -393,18 +393,18 @@
     <div class="map-bg" style="background-image: url('{{backgroundImage}}');"></div>
     <div class="content">
       <div class="header">
-        <div class="contact-info">info@entec.store<br>+1 (223) 203-0312</div>
+        <div class="contact-info">{{companyEmail}}<br>{{companyPhone}}</div>
         <div class="logo-block">
           {{#if logoImage}}
           <img src="{{logoImage}}" class="logo-img" alt="EN TEC Logo">
           {{else}}
-          <div class="logo-title">EN TEC</div>
+          <div class="logo-title">{{companyName}}</div>
           {{/if}}
           <div class="logo-subtitle">
             <span>MARKETING</span>
             <div class="divider"></div><span>COMPANY</span>
           </div>
-          <div class="tagline">Our word is a guarantee</div>
+          <div class="tagline">{{tagline}}</div>
         </div>
         <div class="badge-wrap">
           <div class="premium-badge">
@@ -419,8 +419,8 @@
       </div>
 
       <div class="referral-footer">
-        When you refer a customer, <span class="gold">3 months will be added to your subscription.</span><br>
-        If you refer 4 customers, <span class="gold">a free year will be added to your subscription.</span>
+        {{referralRule1}}<br>
+        {{referralRule2}}
       </div>
     </div>
   </div>
@@ -483,10 +483,7 @@
           </div>
           {{/if}}
           <div class="payment-note">
-            Your subscription payment has been processed successfully via <strong>{{paymentMethod}}</strong>.
-            You can now access your subscription benefits by logging into the {{appType}} app, where your
-            subscription status will be visible in account settings. For any questions or assistance, feel free
-            to contact customer support. We are here to help.
+            {{{noticeText}}}
           </div>
         </div>
       </div>
@@ -635,17 +632,10 @@
         <div class="notice-block">
           <h2>notice</h2>
           <p>
-            In case the screens work at the same time, the broadcast will be interrupted until all the screens
-            are turned off, one screen is returned on the same account and everything returns to work by 100%
+            {{{noticeText}}}
           </p>
           <p>
-            In case you request to activate another application on the same account with a different device id
-            and device key, the cost of copying the account and activating the application will be <strong>$25</strong>.
-          </p>
-          <p>
-            We are genuinely thrilled to welcome you as a subscriber to the Bob Player app. If you encounter any
-            issues or need guidance, feel free to reach out. We are excited to provide you with a seamless and
-            enriching experience. Best regards, <strong>EN TEC Team</strong>
+            Best regards, <strong>{{companyName}} Team</strong>
           </p>
         </div>
       </div>

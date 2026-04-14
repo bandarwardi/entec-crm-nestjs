@@ -8,8 +8,11 @@ export class AiConversation {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
   user: Types.ObjectId;
 
-  @Prop({ nullable: true })
+  @Prop({ required: false })
   title: string;
+
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const AiConversationSchema = SchemaFactory.createForClass(AiConversation);

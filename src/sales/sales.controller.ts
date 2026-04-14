@@ -15,6 +15,19 @@ import { Role } from '../users/roles.enum';
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
+  // --- Invoice Settings ---
+  @Get('invoice-settings')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async getInvoiceSettings() {
+    return this.salesService.getInvoiceSettings();
+  }
+
+  @Put('invoice-settings')
+  @Roles(Role.SUPER_ADMIN)
+  async updateInvoiceSettings(@Body() dto: any) {
+    return this.salesService.updateInvoiceSettings(dto);
+  }
+
   // --- Customers ---
   @Get('customers')
   async findAllCustomers(@Query() query: QueryCustomersDto) {

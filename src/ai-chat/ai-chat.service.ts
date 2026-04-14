@@ -38,7 +38,7 @@ export class AiChatService implements OnModuleInit {
       - أي استفسار متعلق بمجال الـ IPTV والمبيعات بشكل عام.
       تحدث دائماً بلهجة مهنية وودودة باللغة العربية.`;
 
-      const modelName = this.configService.get<string>('GEMINI_MODEL') || 'gemini-2.5-flash';
+      const modelName = this.configService.get<string>('GEMINI_MODEL') || 'gemini-1.5-flash';
       this.model = this.genAI.getGenerativeModel({ 
         model: modelName,
         systemInstruction: {
@@ -66,13 +66,28 @@ export class AiChatService implements OnModuleInit {
       user: new Types.ObjectId(userId),
       title: title || 'محادثة جديدة'
     });
-    return conversation.save();
+    const saved = await conversation.save();
+    return {
+      id: (saved as any)._id.toString(),
+      userId: saved.user.toString(),
+      title: saved.title,
+      createdAt: (saved as any).createdAt,
+      updatedAt: (saved as any).updatedAt,
+    };
   }
 
   async getUserConversations(userId: string) {
-    return this.conversationModel.find({ user: userId })
+    const conversations = await this.conversationModel.find({ user: new Types.ObjectId(userId) })
       .sort({ updatedAt: -1 })
       .exec();
+
+    return conversations.map(conv => ({
+      id: (conv as any)._id.toString(),
+      userId: conv.user.toString(),
+      title: conv.title,
+      createdAt: (conv as any).createdAt,
+      updatedAt: (conv as any).updatedAt,
+    }));
   }
 
   async getConversationMessages(conversationId: string, userId: string) {
@@ -80,9 +95,17 @@ export class AiChatService implements OnModuleInit {
     if (!conversation) throw new NotFoundException('المحادثة غير موجودة');
     if (conversation.user.toString() !== userId) throw new ForbiddenException('لا تملك صلاحية الوصول لهذه المحادثة');
 
-    return this.messageModel.find({ conversation: conversationId })
+    const messages = await this.messageModel.find({ conversation: new Types.ObjectId(conversationId) })
       .sort({ createdAt: 1 })
       .exec();
+
+    return messages.map(m => ({
+      id: (m as any)._id.toString(),
+      conversationId: m.conversation.toString(),
+      role: m.role,
+      content: m.content,
+      createdAt: (m as any).createdAt,
+    }));
   }
 
   async sendMessage(userId: string, conversationId: string, content: string) {
@@ -97,14 +120,16 @@ export class AiChatService implements OnModuleInit {
       role: 'user',
       content
     });
-    const savedUserMsg = await userMsg.save();
-    console.log('AI Chat: User message saved:', savedUserMsg._id);
+    await userMsg.save();
 
     // Update title if it was default
     if (conversation.title === 'محادثة جديدة') {
       conversation.title = content.substring(0, 30) + (content.length > 30 ? '...' : '');
-      await conversation.save();
     }
+    
+    // Alway update updatedAt to move it to top
+    (conversation as any).updatedAt = new Date();
+    await conversation.save();
 
     // 2. Get History for Gemini
     const messages = await this.messageModel.find({ conversation: new Types.ObjectId(conversationId) })
@@ -138,8 +163,17 @@ export class AiChatService implements OnModuleInit {
         content: aiResponse
       });
       const savedAiMsg = await aiMsg.save();
-      console.log('AI Chat: AI message saved:', savedAiMsg._id);
-      return savedAiMsg;
+      
+      // Update conversation again to ensure it stays at the top after AI response
+      await this.conversationModel.findByIdAndUpdate(conversationId, { updatedAt: new Date() }).exec();
+      
+      return {
+        id: (savedAiMsg as any)._id.toString(),
+        conversationId: savedAiMsg.conversation.toString(),
+        role: savedAiMsg.role,
+        content: savedAiMsg.content,
+        createdAt: (savedAiMsg as any).createdAt,
+      };
     } catch (error) {
       console.error('Gemini API Error:', error);
       const errorMsg = new this.messageModel({
@@ -147,7 +181,18 @@ export class AiChatService implements OnModuleInit {
         role: 'model',
         content: 'عذراً، حدث خطأ أثناء الاتصال بالذكاء الاصطناعي: ' + (error.message || 'خطأ غير معروف')
       });
-      return errorMsg.save();
+      const savedErrorMsg = await errorMsg.save();
+      
+      // Update conversation timestamp even on error
+      await this.conversationModel.findByIdAndUpdate(conversationId, { updatedAt: new Date() }).exec();
+      
+      return {
+        id: (savedErrorMsg as any)._id.toString(),
+        conversationId: savedErrorMsg.conversation.toString(),
+        role: savedErrorMsg.role,
+        content: savedErrorMsg.content,
+        createdAt: (savedErrorMsg as any).createdAt,
+      };
     }
   }
 
@@ -157,7 +202,7 @@ export class AiChatService implements OnModuleInit {
     if (conversation.user.toString() !== userId) throw new ForbiddenException('لا تملك صلاحية الوصول لهذه المحادثة');
 
     // Also delete messages
-    await this.messageModel.deleteMany({ conversation: conversationId }).exec();
+    await this.messageModel.deleteMany({ conversation: new Types.ObjectId(conversationId) }).exec();
     return this.conversationModel.findByIdAndDelete(conversationId).exec();
   }
 

@@ -13,6 +13,8 @@ export class AiMessage {
 
   @Prop({ type: String, required: true })
   content: string;
+
+  createdAt?: Date;
 }
 
 export const AiMessageSchema = SchemaFactory.createForClass(AiMessage);

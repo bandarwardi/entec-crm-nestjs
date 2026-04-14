@@ -7,6 +7,9 @@ import { UserStatus } from './user-status.enum';
 import { WorkSettingsService } from '../work-settings/work-settings.service';
 import { DateTime } from 'luxon';
 
+// Grace period in minutes: allow login up to this many minutes before shift start
+const EARLY_LOGIN_GRACE_MINUTES = 5;
+
 @Injectable()
 export class PerformanceService {
   constructor(
@@ -81,9 +84,11 @@ export class PerformanceService {
         minutes: settings.shiftEndMinute - settings.shiftStartMinute
       });
 
+      // Include activities from a few minutes before shift start (early login grace period)
+      const earlyWindow = shiftStart.minus({ minutes: EARLY_LOGIN_GRACE_MINUTES });
       const shiftActivities = activities.filter(a => {
         const ts = DateTime.fromJSDate(a.timestamp).setZone(timezone);
-        return ts >= shiftStart && ts <= shiftEnd;
+        return ts >= earlyWindow && ts <= shiftEnd;
       });
 
       if (shiftActivities.length === 0) {
@@ -105,18 +110,23 @@ export class PerformanceService {
       const firstActivity = shiftActivities[0];
       const firstTs = DateTime.fromJSDate(firstActivity.timestamp).setZone(timezone);
       if (firstActivity.status === UserStatus.ONLINE || firstActivity.status === UserStatus.BUSY || firstActivity.status === UserStatus.BREAK) {
-        if (firstTs > shiftStart.plus({ minutes: 5 })) { 
+        // If logged in before shift start (early login), treat as on-time
+        if (firstTs >= shiftStart && firstTs > shiftStart.plus({ minutes: 5 })) { 
           lateMinutes = Math.floor(firstTs.diff(shiftStart, 'minutes').minutes);
         }
+        // If firstTs < shiftStart => early login, lateMinutes stays 0 (on time)
       }
 
       for (let i = 0; i < shiftActivities.length; i++) {
         const current = shiftActivities[i];
         const next = shiftActivities[i + 1];
-        const currentTs = DateTime.fromJSDate(current.timestamp).setZone(timezone);
+        let currentTs = DateTime.fromJSDate(current.timestamp).setZone(timezone);
         const nextTs = next 
           ? DateTime.fromJSDate(next.timestamp).setZone(timezone)
           : shiftEnd; 
+
+        // Clamp early-login timestamps to shift start for duration calculation
+        if (currentTs < shiftStart) currentTs = shiftStart;
 
         const duration = Math.max(0, Math.floor(nextTs.diff(currentTs, 'minutes').minutes));
 
@@ -182,10 +192,12 @@ export class PerformanceService {
       minutes: settings.shiftEndMinute - settings.shiftStartMinute
     });
 
+    // Include activities from the early login grace period
+    const earlyWindow = shiftStart.minus({ minutes: EARLY_LOGIN_GRACE_MINUTES });
     const activities = await this.activityModel.find({
       user: userId,
       timestamp: {
-        $gte: shiftStart.toJSDate(),
+        $gte: earlyWindow.toJSDate(),
         $lte: shiftEnd.toJSDate(),
       },
     }).sort({ timestamp: 1 }).exec();
@@ -196,12 +208,16 @@ export class PerformanceService {
     let lateMinutes = 0;
 
     const detailedActivities = activities.map((activity, index) => {
-      const currentTs = DateTime.fromJSDate(activity.timestamp).setZone(timezone);
+      let currentTs = DateTime.fromJSDate(activity.timestamp).setZone(timezone);
+      const originalTs = currentTs; // Keep original for display
       const next = activities[index + 1];
       const nextTs = next 
         ? DateTime.fromJSDate(next.timestamp).setZone(timezone)
         : shiftEnd;
       
+      // Clamp early-login timestamps to shift start for duration calculation
+      if (currentTs < shiftStart) currentTs = shiftStart;
+
       const duration = Math.max(0, Math.floor(nextTs.diff(currentTs, 'minutes').minutes));
 
       if (activity.status === UserStatus.ONLINE) activeMinutes += duration;
@@ -214,7 +230,7 @@ export class PerformanceService {
         status: activity.status,
         breakReason: activity.breakReason,
         notes: activity.notes,
-        timestamp: currentTs.toISO(),
+        timestamp: originalTs.toISO(),
         duration,
       };
     });
@@ -223,9 +239,11 @@ export class PerformanceService {
       const firstActivity = activities[0];
       const firstTs = DateTime.fromJSDate(firstActivity.timestamp).setZone(timezone);
       if (firstActivity.status === UserStatus.ONLINE || firstActivity.status === UserStatus.BUSY || firstActivity.status === UserStatus.BREAK) {
-        if (firstTs > shiftStart.plus({ minutes: 5 })) {
+        // If logged in before shift start (early login), treat as on-time
+        if (firstTs >= shiftStart && firstTs > shiftStart.plus({ minutes: 5 })) {
           lateMinutes = Math.floor(firstTs.diff(shiftStart, 'minutes').minutes);
         }
+        // If firstTs < shiftStart => early login, lateMinutes stays 0 (on time)
       }
     }
 

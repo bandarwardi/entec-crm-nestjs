@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { CacheService } from '../common/cache.service';
 import { Customer, CustomerDocument } from './schemas/customer.schema';
 import { Order, OrderDocument } from './schemas/order.schema';
+import { InvoiceSettings, InvoiceSettingsDocument } from './schemas/invoice-settings.schema';
 import { Lead, LeadDocument } from '../leads/schemas/lead.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { CreateCustomerDto, UpdateCustomerDto, CreateOrderDto, UpdateOrderDto, QueryOrdersDto, QueryCustomersDto, DashboardQueryDto } from './sales.dto';
@@ -18,6 +19,8 @@ export class SalesService {
     private customerModel: Model<CustomerDocument>,
     @InjectModel(Order.name)
     private orderModel: Model<OrderDocument>,
+    @InjectModel(InvoiceSettings.name)
+    private invoiceSettingsModel: Model<InvoiceSettingsDocument>,
     @InjectModel(Lead.name)
     private leadModel: Model<LeadDocument>,
     @InjectModel(User.name)
@@ -26,6 +29,23 @@ export class SalesService {
     private emailService: EmailService,
     private invoicePdfService: InvoicePdfService,
   ) {}
+
+  // --- Invoice Settings ---
+
+  async getInvoiceSettings(): Promise<InvoiceSettingsDocument> {
+    let settings = await this.invoiceSettingsModel.findOne().exec();
+    if (!settings) {
+      settings = await new this.invoiceSettingsModel({}).save();
+    }
+    return settings;
+  }
+
+  async updateInvoiceSettings(dto: Partial<InvoiceSettings>): Promise<InvoiceSettingsDocument> {
+    const settings = await this.getInvoiceSettings();
+    const updated = await this.invoiceSettingsModel.findByIdAndUpdate(settings._id, dto, { new: true }).exec();
+    if (!updated) throw new NotFoundException('إعدادات الفاتورة غير موجودة');
+    return updated;
+  }
 
   // --- Customers ---
 
@@ -454,7 +474,8 @@ export class SalesService {
     if (!order) throw new NotFoundException('Order not found');
     if (!(order.customer as any).email) throw new BadRequestException('Customer does not have an email address');
 
-    const pdfBuffer = await this.invoicePdfService.generateInvoiceBuffer(order);
+    const settings = await this.getInvoiceSettings();
+    const pdfBuffer = await this.invoicePdfService.generateInvoiceBuffer(order, settings);
 
     const subject = `Invoice for Order #${order._id} - EN TEC`;
     const text = `Dear ${(order.customer as any).name},\n\nPlease find attached the invoice for your order #${order._id}.\n\nThank you for your business!`;

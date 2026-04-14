@@ -5,10 +5,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DateTime } from 'luxon';
 import { Order } from './schemas/order.schema';
+import { InvoiceSettings } from './schemas/invoice-settings.schema';
 
 @Injectable()
 export class InvoicePdfService {
-  async generateInvoiceBuffer(order: Order): Promise<Buffer> {
+  async generateInvoiceBuffer(order: Order, settings: InvoiceSettings): Promise<Buffer> {
     const templatePath = path.resolve(process.cwd(), 'entec-invoice-template.html');
     const templateHtml = fs.readFileSync(templatePath, 'utf-8');
 
@@ -34,6 +35,15 @@ export class InvoicePdfService {
       attachments: this.processAttachments(order.attachments || []),
       backgroundImage: this.getImageBase64('src/assets/imgs/invoice-bg.png'),
       logoImage: this.getImageBase64('src/assets/imgs/logo.jpeg'),
+      
+      // Dynamic settings from database
+      companyName: settings.companyName,
+      tagline: settings.tagline,
+      companyEmail: settings.email,
+      companyPhone: settings.phone,
+      referralRule1: settings.referralRule1,
+      referralRule2: settings.referralRule2,
+      noticeText: settings.noticeText.replace(/\n/g, '<br>'),
     };
 
     console.log(`[Invoice] Generating PDF for Order #${order.id}`);

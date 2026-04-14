@@ -94,13 +94,11 @@ export class LeadsService {
   async getPendingReminders(userId: string) {
     const now = new Date();
     const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
-    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
     return this.leadModel.find({
-      createdBy: userId,
+      createdBy: new Types.ObjectId(userId),
       reminderRead: false,
       reminderAt: {
-        $gte: oneHourAgo,
         $lte: oneHourFromNow
       },
     }).sort({ reminderAt: 1 }).exec();

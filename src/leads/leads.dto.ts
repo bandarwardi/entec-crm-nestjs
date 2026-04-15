@@ -3,16 +3,16 @@ import { LeadStatus } from './lead-status.enum';
 
 export class CreateLeadDto {
   @IsString()
-  @IsNotEmpty()
-  name: string;
+  @IsOptional()
+  name?: string;
 
   @IsString()
   @IsNotEmpty()
   phone: string;
 
   @IsString()
-  @IsNotEmpty()
-  state: string;
+  @IsOptional()
+  state?: string;
 
   @IsString()
   @IsOptional()
@@ -81,4 +81,8 @@ export class QueryLeadsDto {
 
     @IsOptional()
     hasReminder?: string;
+
+    @IsString()
+    @IsOptional()
+    createdBy?: string;
 }

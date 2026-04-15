@@ -1,19 +1,22 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { memoryStorage } from 'multer';
 import { SalesService } from './sales.service';
 import { CreateCustomerDto, UpdateCustomerDto, CreateOrderDto, UpdateOrderDto, QueryOrdersDto, QueryCustomersDto, DashboardQueryDto } from './sales.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '../users/roles.enum';
+import { UploadProxyService } from '../common/upload-proxy.service';
 
 @Controller('sales')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.AGENT)
 export class SalesController {
-  constructor(private readonly salesService: SalesService) {}
+  constructor(
+    private readonly salesService: SalesService,
+    private readonly uploadProxy: UploadProxyService,
+  ) {}
 
   // --- Invoice Settings ---
   @Get('invoice-settings')
@@ -100,17 +103,10 @@ export class SalesController {
   }
 
   @Post('upload-attachment')
-  @UseInterceptors(FileInterceptor('file', {
-    storage: diskStorage({
-      destination: './uploads',
-      filename: (req, file, cb) => {
-        const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
-        return cb(null, `${randomName}${extname(file.originalname)}`);
-      }
-    })
-  }))
-  async uploadAttachment(@UploadedFile() file: any) {
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  async uploadAttachment(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException('No file uploaded');
-    return { url: `/uploads/${file.filename}` };
+    const url = await this.uploadProxy.uploadFile(file);
+    return { url };
   }
 }

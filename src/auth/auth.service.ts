@@ -91,8 +91,8 @@ export class AuthService {
   }
 
   async verifyPassword(userId: string, pass: string): Promise<boolean> {
-    const user = await this.usersService.findOne(userId);
-    if (!user) return false;
+    const user = await this.usersService.findOneWithPassword(userId);
+    if (!user || !(user as any).passwordHash) return false;
     return bcrypt.compare(pass, (user as any).passwordHash);
   }
 }

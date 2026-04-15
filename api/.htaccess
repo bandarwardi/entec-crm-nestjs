@@ -1,0 +1,22 @@
+# Disable directory listing
+Options -Indexes
+
+# Block direct access to config.php
+<Files "config.php">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+# Only allow access to upload.php and uploads/ folder
+<FilesMatch "^(?!upload\.php).*\.php$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+
+# CORS and caching headers for uploaded files
+<IfModule mod_headers.c>
+    <FilesMatch "\.(jpg|jpeg|png|webp|gif|pdf)$">
+        Header set Access-Control-Allow-Origin "*"
+        Header set Cache-Control "public, max-age=31536000"
+    </FilesMatch>
+</IfModule>

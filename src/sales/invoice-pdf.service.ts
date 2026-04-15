@@ -3,6 +3,7 @@ import * as puppeteer from 'puppeteer';
 import * as handlebars from 'handlebars';
 import * as fs from 'fs';
 import * as path from 'path';
+import fetch from 'node-fetch';
 import { DateTime } from 'luxon';
 import { Order } from './schemas/order.schema';
 import { InvoiceSettings } from './schemas/invoice-settings.schema';
@@ -32,7 +33,7 @@ export class InvoicePdfService {
       appYears: order.appYears || 1,
       notes: order.notes,
       devices: order.devices || [],
-      attachments: this.processAttachments(order.attachments || []),
+      attachments: await this.processAttachments(order.attachments || []),
       backgroundImage: this.getImageBase64('src/assets/imgs/invoice-bg.png'),
       logoImage: this.getImageBase64('src/assets/imgs/logo.jpeg'),
       
@@ -95,35 +96,37 @@ export class InvoicePdfService {
     }
   }
 
-  private processAttachments(attachments: string[]): string[] {
-    return attachments.map((attr) => {
-      // If it's already a full URL or base64, keep it
-      if (attr.startsWith('http') || attr.startsWith('data:')) {
-        return attr;
-      }
-
-      // If it's a relative path starting with /uploads/, resolve it to the filesystem
-      if (attr.startsWith('/uploads/')) {
-        const filePath = path.join(process.cwd(), attr);
-        if (fs.existsSync(filePath)) {
-          const fileData = fs.readFileSync(filePath);
-          const ext = path.extname(filePath).toLowerCase();
-          const mime = ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'application/octet-stream';
-          return `data:${mime};base64,${fileData.toString('base64')}`;
+  private async processAttachments(attachments: string[]): Promise<string[]> {
+    return Promise.all(
+      attachments.map(async (attr) => {
+        // Already base64 — return as-is
+        if (attr.startsWith('data:')) {
+          return attr;
         }
-      }
 
-      // If it's just a filename in the uploads folder
-      const uploadsPath = path.join(process.cwd(), 'uploads', attr);
-      if (fs.existsSync(uploadsPath)) {
-        const fileData = fs.readFileSync(uploadsPath);
-        const ext = path.extname(uploadsPath).toLowerCase();
-        const mime = ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'application/octet-stream';
-        return `data:${mime};base64,${fileData.toString('base64')}`;
-      }
+        // Full remote URL (Namecheap or any https) — fetch and convert to Base64
+        if (attr.startsWith('http')) {
+          try {
+            const response = await fetch(attr);
+            if (!response.ok) {
+              console.error(`[Invoice] Failed to fetch attachment ${attr}: HTTP ${response.status}`);
+              return attr;
+            }
+            const buffer = await response.buffer();
+            const contentType = response.headers.get('content-type') || 'image/jpeg';
+            const mime = contentType.split(';')[0].trim();
+            console.log(`[Invoice] Fetched attachment from ${attr} (${Math.round(buffer.length / 1024)}KB)`);
+            return `data:${mime};base64,${buffer.toString('base64')}`;
+          } catch (err) {
+            console.error(`[Invoice] Error fetching attachment ${attr}:`, err.message);
+            return attr;
+          }
+        }
 
-      return attr;
-    });
+        // Fallback: unknown format, return as-is
+        return attr;
+      }),
+    );
   }
 
   private getImageBase64(relativeFilePath: string): string {

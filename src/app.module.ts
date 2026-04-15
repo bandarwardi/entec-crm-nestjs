@@ -1,8 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { ServeStaticModule } from '@nestjs/serve-static';
-import { join } from 'path';
 import { ScheduleModule } from '@nestjs/schedule';
 import { RedisModule } from '@nestjs-modules/ioredis';
 import { CommonModule } from './common/common.module';
@@ -21,10 +19,6 @@ import { EmailModule } from './email/email.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-    }),
-    ServeStaticModule.forRoot({
-      rootPath: join(__dirname, '..', 'uploads'),
-      serveRoot: '/uploads',
     }),
     MongooseModule.forRootAsync({
       imports: [ConfigModule],

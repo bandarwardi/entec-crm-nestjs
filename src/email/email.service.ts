@@ -8,11 +8,11 @@ export class EmailService {
   private readonly logger = new Logger(EmailService.name);
 
   constructor(private configService: ConfigService) {
-    const port = Number(this.configService.get<number>('SMTP_PORT', 587));
+    const port = Number(this.configService.get<number>('SMTP_PORT', 465));
     const secure = port === 465;
 
     this.transporter = nodemailer.createTransport({
-      host: this.configService.get<string>('SMTP_HOST', 'smtp.gmail.com'),
+      host: this.configService.get<string>('SMTP_HOST', 'smtp.hostinger.com'),
       port: port,
       secure: secure,
       auth: {

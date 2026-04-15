@@ -76,6 +76,10 @@ export class UsersService {
       .exec();
   }
 
+  async findOneWithPassword(id: any): Promise<User | null> {
+    return this.userModel.findById(id).exec();
+  }
+
   async update(id: any, updateData: Partial<User>): Promise<User | null> {
     return this.userModel.findByIdAndUpdate(id, updateData, { new: true })
       .select('id name email role avatar currentStatus createdAt')

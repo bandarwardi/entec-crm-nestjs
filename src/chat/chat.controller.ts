@@ -13,22 +13,19 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ChatService } from './chat.service';
 import { MediaType } from './schemas/message.schema';
-import { existsSync, mkdirSync } from 'fs';
-
-const UPLOAD_PATH = './uploads/chat';
-if (!existsSync(UPLOAD_PATH)) {
-  mkdirSync(UPLOAD_PATH, { recursive: true });
-}
+import { UploadProxyService } from '../common/upload-proxy.service';
 
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly uploadProxy: UploadProxyService,
+  ) {}
 
   @Get('conversations')
   async getConversations(@Request() req) {
@@ -64,31 +61,8 @@ export class ChatController {
   @Post('conversations/:id/upload')
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: UPLOAD_PATH,
-        filename: (req, file, cb) => {
-          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-          cb(null, `${file.fieldname}-${uniqueSuffix}${extname(file.originalname)}`);
-        },
-      }),
+      storage: memoryStorage(),
       limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
-      fileFilter: (req, file, cb) => {
-        const allowedTypes = [
-          'image/jpeg',
-          'image/png',
-          'image/gif',
-          'application/pdf',
-          'application/msword',
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          'application/vnd.ms-excel',
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ];
-        if (allowedTypes.includes(file.mimetype)) {
-          cb(null, true);
-        } else {
-          cb(new BadRequestException('Invalid file type'), false);
-        }
-      },
     }),
   )
   async uploadMedia(
@@ -100,8 +74,8 @@ export class ChatController {
       throw new BadRequestException('File is missing');
     }
 
+    const mediaUrl = await this.uploadProxy.uploadFile(file);
     const mediaType = file.mimetype.startsWith('image/') ? MediaType.IMAGE : MediaType.FILE;
-    const mediaUrl = `/uploads/chat/${file.filename}`;
 
     const message = await this.chatService.sendMessage(req.user.userId, conversationId, {
       mediaUrl,

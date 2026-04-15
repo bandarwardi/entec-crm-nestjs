@@ -14,7 +14,9 @@ export class LeadsService {
   ) { }
 
   async findAll(query: QueryLeadsDto, user: any) {
-    const { page = 1, limit = 20, search, status, state, hasReminder } = query;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
+    const { search, status, state, hasReminder, createdBy } = query;
     const skip = (page - 1) * limit;
 
     const filter: any = {};
@@ -22,6 +24,10 @@ export class LeadsService {
     if (state) filter.state = state;
     if (hasReminder === 'true') filter.reminderAt = { $ne: null };
     if (hasReminder === 'false') filter.reminderAt = null;
+
+    if (createdBy && (user.role === 'admin' || user.role === 'super-admin')) {
+      filter.createdBy = new Types.ObjectId(createdBy);
+    }
 
     console.log('Leads: User making request:', JSON.stringify(user));
     const currentUserId = user.userId || user.id;
@@ -71,7 +77,7 @@ export class LeadsService {
     const saved = await lead.save();
     console.log('Leads: Saved lead with createdBy:', saved.createdBy);
     await this.cacheService.invalidateByPattern('dashboard:stats:*');
-    
+
     // Populate the creator details before returning to frontend
     return this.leadModel.findById(saved._id).populate('createdBy', 'id name email role').exec();
   }

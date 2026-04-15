@@ -1,13 +1,13 @@
 import { Controller, Get, Post, Body, UseGuards, Put, Param, Delete, ParseIntPipe, BadRequestException, NotFoundException, Query, Request, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { memoryStorage } from 'multer';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from './roles.enum';
 import { PerformanceService } from './performance.service';
+import { UploadProxyService } from '../common/upload-proxy.service';
 import * as bcrypt from 'bcrypt';
 import { UserStatus, BreakReason } from './user-status.enum';
 
@@ -17,6 +17,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly performanceService: PerformanceService,
+    private readonly uploadProxy: UploadProxyService,
   ) { }
 
   @Post('seed')
@@ -51,19 +52,12 @@ export class UsersController {
   }
 
   @Post('avatar')
-  @UseInterceptors(FileInterceptor('file', {
-    storage: diskStorage({
-      destination: './uploads',
-      filename: (req, file, cb) => {
-        const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
-        return cb(null, `${randomName}${extname(file.originalname)}`);
-      }
-    })
-  }))
-  async uploadAvatar(@Request() req: any, @UploadedFile() file: any) {
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  async uploadAvatar(@Request() req: any, @UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException('No file uploaded');
-    await this.usersService.update(req.user.userId, { avatar: file.filename });
-    return { avatar: file.filename };
+    const url = await this.uploadProxy.uploadFile(file);
+    await this.usersService.update(req.user.userId, { avatar: url });
+    return { avatar: url };
   }
 
   @Get('activities')

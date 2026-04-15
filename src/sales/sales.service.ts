@@ -28,7 +28,7 @@ export class SalesService {
     private cacheService: CacheService,
     private emailService: EmailService,
     private invoicePdfService: InvoicePdfService,
-  ) {}
+  ) { }
 
   // --- Invoice Settings ---
 
@@ -50,7 +50,9 @@ export class SalesService {
   // --- Customers ---
 
   async findAllCustomers(query: QueryCustomersDto) {
-    const { page = 1, limit = 10, search } = query;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 10;
+    const { search } = query;
     const skip = (page - 1) * limit;
 
     const filter: any = {};
@@ -76,13 +78,13 @@ export class SalesService {
   async findOneCustomer(id: string) {
     const customer = await this.customerModel.findById(id).exec();
     if (!customer) throw new NotFoundException('العميل غير موجود');
-    
+
     // In SQL we had relations: ['orders', 'orders.devices']
     // In Mongo we can find orders separately or use aggregate
     console.log('Finding orders for customer ID:', id);
     const orders = await this.orderModel.find({ customer: new Types.ObjectId(id) }).exec();
     console.log('Found orders:', orders.length);
-    
+
     const result = customer.toObject() as any;
     result.orders = orders;
     return result;
@@ -104,18 +106,18 @@ export class SalesService {
   async updateCustomer(id: string, dto: UpdateCustomerDto) {
     const customer = await this.customerModel.findById(id).exec();
     if (!customer) throw new NotFoundException('العميل غير موجود');
-    
+
     if (dto.phone && dto.phone !== customer.phone) {
-        const existing = await this.customerModel.findOne({ phone: dto.phone }).exec();
-        if (existing) throw new BadRequestException('العميل برقم الهاتف هذا موجود بالفعل');
+      const existing = await this.customerModel.findOne({ phone: dto.phone }).exec();
+      if (existing) throw new BadRequestException('العميل برقم الهاتف هذا موجود بالفعل');
     }
 
     if (dto.address !== customer.address || dto.state !== customer.state) {
-        const coords = await this.geocode(dto.address, dto.state);
-        if (coords) {
-            (dto as any).latitude = coords.latitude;
-            (dto as any).longitude = coords.longitude;
-        }
+      const coords = await this.geocode(dto.address, dto.state);
+      if (coords) {
+        (dto as any).latitude = coords.latitude;
+        (dto as any).longitude = coords.longitude;
+      }
     }
 
     const updated = await this.customerModel.findByIdAndUpdate(id, dto, { new: true }).exec();
@@ -126,63 +128,81 @@ export class SalesService {
   // --- Orders ---
 
   async findAllOrders(query: QueryOrdersDto) {
-    const { page = 1, limit = 10, search, status, type } = query;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 10;
+    const { search, status, type } = query;
     const skip = (page - 1) * limit;
 
     // Search by customer name requires $lookup or searching in objects
     // For simplicity, we filter orders and then search customer if needed, 
     // but better to use aggregate for full search capability.
-    
+
     const filter: any = {};
     if (status) filter.status = status;
     if (type) filter.type = type;
 
     // Use aggregate for search by customer name
     if (search) {
-        const pipeline: any[] = [
-            { $lookup: { from: 'customers', localField: 'customer', foreignField: '_id', as: 'customerData' } },
-            { $unwind: '$customerData' },
-            { 
-              $match: {
-                $or: [
-                    { 'customerData.name': { $regex: search, $options: 'i' } },
-                    { notes: { $regex: search, $options: 'i' } }
-                ],
-                ...filter
-              } 
+      const pipeline: any[] = [
+        { $lookup: { from: 'customers', localField: 'customer', foreignField: '_id', as: 'customerData' } },
+        { $unwind: '$customerData' },
+        {
+          $match: {
+            $or: [
+              { 'customerData.name': { $regex: search, $options: 'i' } },
+              { notes: { $regex: search, $options: 'i' } }
+            ],
+            ...filter
+          }
+        },
+        { $sort: { createdAt: -1 } },
+        { $skip: skip },
+        { $limit: limit },
+        { $lookup: { from: 'users', localField: 'leadAgent', foreignField: '_id', as: 'leadAgent' } },
+        { $lookup: { from: 'users', localField: 'closerAgent', foreignField: '_id', as: 'closerAgent' } },
+        { $unwind: { path: '$leadAgent', preserveNullAndEmptyArrays: true } },
+        { $unwind: { path: '$closerAgent', preserveNullAndEmptyArrays: true } },
+        { $addFields: { 
+            customer: {
+                $mergeObjects: [
+                    '$customerData',
+                    { 
+                        id: { 
+                            $cond: {
+                                if: { $gt: ['$customerData._id', null] },
+                                then: { $toString: '$customerData._id' },
+                                else: null
+                            }
+                        }
+                    }
+                ]
             },
-            { $sort: { createdAt: -1 } },
-            { $skip: skip },
-            { $limit: limit },
-            { $lookup: { from: 'users', localField: 'leadAgent', foreignField: '_id', as: 'leadAgent' } },
-            { $lookup: { from: 'users', localField: 'closerAgent', foreignField: '_id', as: 'closerAgent' } },
-            { $unwind: { path: '$leadAgent', preserveNullAndEmptyArrays: true } },
-            { $unwind: { path: '$closerAgent', preserveNullAndEmptyArrays: true } },
-            { $addFields: { customer: '$customerData' } },
-            { $project: { customerData: 0 } }
-        ];
+            id: { $toString: '$_id' }
+        } },
+        { $project: { customerData: 0 } }
+      ];
 
-        const data = await this.orderModel.aggregate(pipeline).exec();
-        
-        // Count for search
-        const totalPipeline = [
-            { $lookup: { from: 'customers', localField: 'customer', foreignField: '_id', as: 'customerData' } },
-            { $unwind: '$customerData' },
-            { 
-              $match: {
-                $or: [
-                    { 'customerData.name': { $regex: search, $options: 'i' } },
-                    { notes: { $regex: search, $options: 'i' } }
-                ],
-                ...filter
-              } 
-            },
-            { $count: 'total' }
-        ];
-        const totalResult = await this.orderModel.aggregate(totalPipeline).exec();
-        const total = totalResult.length > 0 ? totalResult[0].total : 0;
+      const data = await this.orderModel.aggregate(pipeline).exec();
 
-        return { data, total, page, limit };
+      // Count for search
+      const totalPipeline = [
+        { $lookup: { from: 'customers', localField: 'customer', foreignField: '_id', as: 'customerData' } },
+        { $unwind: '$customerData' },
+        {
+          $match: {
+            $or: [
+              { 'customerData.name': { $regex: search, $options: 'i' } },
+              { notes: { $regex: search, $options: 'i' } }
+            ],
+            ...filter
+          }
+        },
+        { $count: 'total' }
+      ];
+      const totalResult = await this.orderModel.aggregate(totalPipeline).exec();
+      const total = totalResult.length > 0 ? totalResult[0].total : 0;
+
+      return { data, total, page, limit };
     }
 
     const data = await this.orderModel.find(filter)
@@ -289,14 +309,17 @@ export class SalesService {
   }
 
   async removeCustomer(id: string) {
-    const result = await this.customerModel.findByIdAndDelete(id).exec();
-    if (!result) throw new NotFoundException('العميل غير موجود');
-    
-    // Optional: Also remove orders for this customer? 
-    // Usually better to keep them or restrict deletion if they have orders.
-    // For now, just delete the customer.
-    await this.invalidateDashboardCache();
-    return { success: true };
+    try {
+      console.log(`[SalesService] Attempting to remove customer: ${id}`);
+      const result = await this.customerModel.findByIdAndDelete(id).exec();
+      console.log(`[SalesService] Delete result:`, result ? 'Found and deleted' : 'Not found');
+      if (!result) throw new NotFoundException('العميل غير موجود');
+      await this.invalidateDashboardCache();
+      return { success: true };
+    } catch (error) {
+      console.error(`[SalesService] CRITICAL Error removing customer ${id}:`, error);
+      throw error;
+    }
   }
 
   // --- Geocoding Helpers ---
@@ -330,14 +353,14 @@ export class SalesService {
   async getDashboardStats(query: DashboardQueryDto) {
     const { period = '30days' } = query;
     const cacheKey = `dashboard:stats:${period}`;
-    
+
     const cached = await this.cacheService.get(cacheKey);
     if (cached) return cached;
 
     const stats = await this.computeDashboardStats(period);
-    
+
     await this.cacheService.set(cacheKey, stats, 300);
-    
+
     return stats;
   }
 
@@ -379,7 +402,7 @@ export class SalesService {
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]).exec();
     const revenueResult = revenueResultArr[0] || { total: 0 };
-    
+
     const prevRevenueResultArr = await this.orderModel.aggregate([
       { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: prevStartDate, $lt: startDate } } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
@@ -404,21 +427,25 @@ export class SalesService {
 
     const revenueByMonth = await this.orderModel.aggregate([
       { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: twelveMonthsAgo } } },
-      { $group: {
+      {
+        $group: {
           _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } },
           revenue: { $sum: '$amount' }
-      }},
+        }
+      },
       { $sort: { _id: 1 } },
       { $project: { month: '$_id', revenue: 1, _id: 0 } }
     ]).exec();
 
     const topAgents = await this.orderModel.aggregate([
       { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: startDate } } },
-      { $group: {
+      {
+        $group: {
           _id: '$closerAgent',
           totalRevenue: { $sum: '$amount' },
           orderCount: { $sum: 1 }
-      }},
+        }
+      },
       { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'agent' } },
       { $unwind: '$agent' },
       { $project: { name: '$agent.name', totalRevenue: 1, orderCount: 1, _id: 0 } },
@@ -431,7 +458,7 @@ export class SalesService {
       { $group: { _id: '$type', count: { $sum: 1 } } },
       { $project: { type: '$_id', count: 1, _id: 0 } }
     ]).exec();
-    
+
     const leadsFunnel = await this.leadModel.aggregate([
       { $match: { createdAt: { $gte: startDate } } },
       { $group: { _id: '$status', count: { $sum: 1 } } },
@@ -487,7 +514,7 @@ export class SalesService {
       console.error(`[Invoice] Order #${orderId} not found`);
       throw new NotFoundException('Order not found');
     }
-    
+
     const customerEmail = (order.customer as any).email;
     if (!customerEmail) {
       console.error(`[Invoice] Customer ${(order.customer as any).name} has no email`);

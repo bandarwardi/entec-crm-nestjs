@@ -6,13 +6,13 @@ export type LeadDocument = Lead & Document;
 
 @Schema({ timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } })
 export class Lead {
-  @Prop({ required: true })
+  @Prop()
   name: string;
 
   @Prop({ required: true })
   phone: string;
 
-  @Prop({ required: true })
+  @Prop()
   state: string;
 
   @Prop()

@@ -288,6 +288,17 @@ export class SalesService {
     return { success: true };
   }
 
+  async removeCustomer(id: string) {
+    const result = await this.customerModel.findByIdAndDelete(id).exec();
+    if (!result) throw new NotFoundException('العميل غير موجود');
+    
+    // Optional: Also remove orders for this customer? 
+    // Usually better to keep them or restrict deletion if they have orders.
+    // For now, just delete the customer.
+    await this.invalidateDashboardCache();
+    return { success: true };
+  }
+
   // --- Geocoding Helpers ---
 
   async geocode(address?: string, state?: string) {

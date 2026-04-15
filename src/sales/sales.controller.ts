@@ -78,9 +78,15 @@ export class SalesController {
   }
 
   @Delete('orders/:id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN)
   async removeOrder(@Param('id') id: string) {
     return this.salesService.removeOrder(id);
+  }
+
+  @Delete('customers/:id')
+  @Roles(Role.SUPER_ADMIN)
+  async removeCustomer(@Param('id') id: string) {
+    return this.salesService.removeCustomer(id);
   }
 
   @Post('orders/:id/send-invoice')

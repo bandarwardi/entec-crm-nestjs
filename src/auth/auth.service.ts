@@ -89,4 +89,10 @@ export class AuthService {
   async logout(userId: any) {
     return this.usersService.updateStatus(userId, UserStatus.OFFLINE);
   }
+
+  async verifyPassword(userId: string, pass: string): Promise<boolean> {
+    const user = await this.usersService.findOne(userId);
+    if (!user) return false;
+    return bcrypt.compare(pass, (user as any).passwordHash);
+  }
 }

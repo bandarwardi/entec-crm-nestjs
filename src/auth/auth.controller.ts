@@ -72,4 +72,11 @@ export class AuthController {
   async updateStatus(@Param('id') id: string, @Param('status') status: string) {
     return this.authService.updateRequestStatus(id, status);
   }
+  
+  @Post('verify-password')
+  @UseGuards(JwtAuthGuard)
+  async verifyPassword(@Body('password') password: string, @Request() req: any) {
+    const isValid = await this.authService.verifyPassword(req.user.userId, password);
+    return { isValid };
+  }
 }

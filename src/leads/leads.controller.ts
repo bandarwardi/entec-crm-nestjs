@@ -27,7 +27,7 @@ export class LeadsController {
   }
 
   @Delete(':id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN)
   async remove(@Param('id') id: string) {
     return this.leadsService.remove(id);
   }

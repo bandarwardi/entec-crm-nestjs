@@ -152,6 +152,7 @@ export class SalesService {
           $match: {
             $or: [
               { 'customerData.name': { $regex: escapedSearch, $options: 'i' } },
+              { 'customerData.phone': { $regex: escapedSearch, $options: 'i' } },
               { notes: { $regex: escapedSearch, $options: 'i' } }
             ],
             ...filter
@@ -194,6 +195,7 @@ export class SalesService {
           $match: {
             $or: [
               { 'customerData.name': { $regex: escapedSearch, $options: 'i' } },
+              { 'customerData.phone': { $regex: escapedSearch, $options: 'i' } },
               { notes: { $regex: escapedSearch, $options: 'i' } }
             ],
             ...filter

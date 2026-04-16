@@ -90,7 +90,14 @@ export class LeadsService {
     return lead;
   }
 
-  async remove(id: string) {
+  async remove(id: string, user: any) {
+    const lead = await this.leadModel.findById(id).exec();
+    if (!lead) throw new NotFoundException('العميل المحتمل غير موجود، تعذر الحذف');
+
+    if (user.role === 'agent' && lead.createdBy?.toString() !== user.userId) {
+      throw new NotFoundException('غير مصرح لك بحذف هذا العميل المحتمل');
+    }
+
     const result = await this.leadModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException('العميل المحتمل غير موجود، تعذر الحذف');
     await this.cacheService.invalidateByPattern('dashboard:stats:*');

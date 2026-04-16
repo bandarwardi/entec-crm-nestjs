@@ -27,9 +27,9 @@ export class LeadsController {
   }
 
   @Delete(':id')
-  @Roles(Role.SUPER_ADMIN)
-  async remove(@Param('id') id: string) {
-    return this.leadsService.remove(id);
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.AGENT)
+  async remove(@Param('id') id: string, @Request() req) {
+    return this.leadsService.remove(id, req.user);
   }
 
   @Get('reminders')

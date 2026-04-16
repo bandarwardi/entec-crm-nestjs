@@ -57,10 +57,11 @@ export class SalesService {
 
     const filter: any = {};
     if (search) {
+      const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } }
+        { name: { $regex: escapedSearch, $options: 'i' } },
+        { phone: { $regex: escapedSearch, $options: 'i' } },
+        { email: { $regex: escapedSearch, $options: 'i' } }
       ];
     }
 
@@ -143,14 +144,15 @@ export class SalesService {
 
     // Use aggregate for search by customer name
     if (search) {
+      const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const pipeline: any[] = [
         { $lookup: { from: 'customers', localField: 'customer', foreignField: '_id', as: 'customerData' } },
         { $unwind: '$customerData' },
         {
           $match: {
             $or: [
-              { 'customerData.name': { $regex: search, $options: 'i' } },
-              { notes: { $regex: search, $options: 'i' } }
+              { 'customerData.name': { $regex: escapedSearch, $options: 'i' } },
+              { notes: { $regex: escapedSearch, $options: 'i' } }
             ],
             ...filter
           }
@@ -191,8 +193,8 @@ export class SalesService {
         {
           $match: {
             $or: [
-              { 'customerData.name': { $regex: search, $options: 'i' } },
-              { notes: { $regex: search, $options: 'i' } }
+              { 'customerData.name': { $regex: escapedSearch, $options: 'i' } },
+              { notes: { $regex: escapedSearch, $options: 'i' } }
             ],
             ...filter
           }

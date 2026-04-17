@@ -20,6 +20,9 @@ export class Customer {
   @Prop()
   state: string;
 
+  @Prop()
+  country: string;
+
   @Prop({ type: Number })
   latitude: number;
 

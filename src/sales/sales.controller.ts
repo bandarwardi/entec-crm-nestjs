@@ -98,8 +98,8 @@ export class SalesController {
   }
 
   @Get('geocode')
-  async geocode(@Query('address') address: string, @Query('state') state: string) {
-    return this.salesService.geocode(address, state);
+  async geocode(@Query('address') address: string, @Query('state') state: string, @Query('country') country: string) {
+    return this.salesService.geocode(address, state, country);
   }
 
   @Post('upload-attachment')

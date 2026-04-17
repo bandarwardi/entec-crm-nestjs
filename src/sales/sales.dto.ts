@@ -22,6 +22,10 @@ export class CreateCustomerDto {
   @IsOptional()
   state?: string;
 
+  @IsString()
+  @IsOptional()
+  country?: string;
+
   @IsNumber()
   @IsOptional()
   latitude?: number;

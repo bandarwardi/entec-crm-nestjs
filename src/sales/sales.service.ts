@@ -95,7 +95,7 @@ export class SalesService {
     const existing = await this.customerModel.findOne({ phone: dto.phone }).exec();
     if (existing) throw new BadRequestException('العميل برقم الهاتف هذا موجود بالفعل');
 
-    const coords = await this.geocode(dto.address, dto.state);
+    const coords = await this.geocode(dto.address, dto.state, dto.country);
     const customer = new this.customerModel({
       ...dto,
       latitude: coords?.latitude || dto.latitude,
@@ -113,8 +113,8 @@ export class SalesService {
       if (existing) throw new BadRequestException('العميل برقم الهاتف هذا موجود بالفعل');
     }
 
-    if (dto.address !== customer.address || dto.state !== customer.state) {
-      const coords = await this.geocode(dto.address, dto.state);
+    if (dto.address !== customer.address || dto.state !== customer.state || dto.country !== customer.country) {
+      const coords = await this.geocode(dto.address, dto.state, dto.country);
       if (coords) {
         (dto as any).latitude = coords.latitude;
         (dto as any).longitude = coords.longitude;
@@ -252,7 +252,7 @@ export class SalesService {
       const existing = await this.customerModel.findOne({ phone: dto.newCustomer.phone }).exec();
       if (existing) throw new BadRequestException('العميل برقم الهاتف هذا موجود بالفعل');
 
-      const coords = await this.geocode(dto.newCustomer.address, dto.newCustomer.state);
+      const coords = await this.geocode(dto.newCustomer.address, dto.newCustomer.state, dto.newCustomer.country);
       const newCustomer = new this.customerModel({
         ...dto.newCustomer,
         latitude: coords?.latitude || dto.newCustomer.latitude,
@@ -332,10 +332,15 @@ export class SalesService {
 
   // --- Geocoding Helpers ---
 
-  async geocode(address?: string, state?: string) {
-    if (!address || !state) return null;
+  async geocode(address?: string, state?: string, country?: string) {
+    if (!address) return null;
     try {
-      const query = encodeURIComponent(`${address}, ${state}`);
+      // Build a more robust query
+      let queryStr = address;
+      if (state) queryStr += `, ${state}`;
+      if (country) queryStr += `, ${country}`;
+
+      const query = encodeURIComponent(queryStr);
       const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1`, {
         headers: { 'User-Agent': 'EN-TEC-CRM/1.0' }
       });

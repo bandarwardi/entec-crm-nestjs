@@ -76,7 +76,6 @@ export class ChatController {
 
     const mediaUrl = await this.uploadProxy.uploadFile(file);
     const mediaType = file.mimetype.startsWith('image/') ? MediaType.IMAGE : MediaType.FILE;
-
     const message = await this.chatService.sendMessage(req.user.userId, conversationId, {
       mediaUrl,
       mediaType,
@@ -84,5 +83,16 @@ export class ChatController {
     });
 
     return message;
+  }
+
+  @Post('conversations/:id/messages')
+  async sendMessage(
+    @Param('id') conversationId: string,
+    @Body('content') content: string,
+    @Request() req,
+  ) {
+    return this.chatService.sendMessage(req.user.userId, conversationId, {
+      content,
+    });
   }
 }

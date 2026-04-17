@@ -21,6 +21,12 @@ export class AuthController {
       return this.authService.login(user);
     }
 
+    const currentDevice = body.device || 'Unknown';
+
+    if (user.trustedDevices && user.trustedDevices.includes(currentDevice)) {
+      return this.authService.login(user);
+    }
+
     const approved = await this.authService.findApprovedRequest(user.id);
     if (approved) {
       return this.authService.login(user);
@@ -30,7 +36,7 @@ export class AuthController {
     await this.authService.submitLoginRequest(user, {
       lat: body.lat,
       lng: body.lng,
-      device: body.device || 'Unknown',
+      device: currentDevice,
       ip: ip
     });
 
@@ -69,8 +75,8 @@ export class AuthController {
   @Put('request/:id/:status')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
-  async updateStatus(@Param('id') id: string, @Param('status') status: string) {
-    return this.authService.updateRequestStatus(id, status);
+  async updateStatus(@Param('id') id: string, @Param('status') status: string, @Body('trustDevice') trustDevice?: boolean) {
+    return this.authService.updateRequestStatus(id, status, trustDevice);
   }
   
   @Post('verify-password')

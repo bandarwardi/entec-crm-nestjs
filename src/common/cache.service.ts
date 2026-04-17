@@ -4,6 +4,8 @@ import Redis from 'ioredis';
 
 @Injectable()
 export class CacheService {
+  private inMemoryCache = new Map<string, { value: string; expiry: number | null }>();
+
   constructor(@InjectRedis() private readonly redis: Redis) {
     this.redis.on('connect', () => {
       console.log('✅ Connected to Redis successfully');
@@ -11,7 +13,7 @@ export class CacheService {
 
     this.redis.on('error', (err) => {
       // Intentionally silences errors to prevent terminal spam
-      // The app will continue working by falling back to DB
+      // The app will continue working by falling back to in-memory DB
     });
   }
 
@@ -20,7 +22,15 @@ export class CacheService {
   }
 
   async get<T>(key: string): Promise<T | null> {
-    if (!this.isConnected()) return null;
+    if (!this.isConnected()) {
+      const cached = this.inMemoryCache.get(key);
+      if (!cached) return null;
+      if (cached.expiry && Date.now() > cached.expiry) {
+        this.inMemoryCache.delete(key);
+        return null;
+      }
+      return JSON.parse(cached.value) as T;
+    }
     try {
       const data = await this.redis.get(key);
       if (!data) return null;
@@ -31,9 +41,13 @@ export class CacheService {
   }
 
   async set(key: string, value: any, ttlSeconds?: number): Promise<void> {
-    if (!this.isConnected()) return;
+    const data = JSON.stringify(value);
+    if (!this.isConnected()) {
+      const expiry = ttlSeconds ? Date.now() + ttlSeconds * 1000 : null;
+      this.inMemoryCache.set(key, { value: data, expiry });
+      return;
+    }
     try {
-      const data = JSON.stringify(value);
       if (ttlSeconds) {
         await this.redis.set(key, data, 'EX', ttlSeconds);
       } else {
@@ -45,7 +59,10 @@ export class CacheService {
   }
 
   async del(key: string): Promise<void> {
-    if (!this.isConnected()) return;
+    if (!this.isConnected()) {
+      this.inMemoryCache.delete(key);
+      return;
+    }
     try {
       await this.redis.del(key);
     } catch (e) {
@@ -54,7 +71,15 @@ export class CacheService {
   }
 
   async invalidateByPattern(pattern: string): Promise<void> {
-    if (!this.isConnected()) return;
+    if (!this.isConnected()) {
+      const regexPattern = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+      for (const key of this.inMemoryCache.keys()) {
+        if (regexPattern.test(key)) {
+          this.inMemoryCache.delete(key);
+        }
+      }
+      return;
+    }
     try {
       const keys = await this.redis.keys(pattern);
       if (keys.length > 0) {

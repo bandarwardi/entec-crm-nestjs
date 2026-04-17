@@ -33,6 +33,14 @@ export class UsersService {
     return user.save();
   }
 
+  async addTrustedDevice(userId: any, deviceInfo: string) {
+    return this.userModel.findByIdAndUpdate(
+      userId,
+      { $addToSet: { trustedDevices: deviceInfo } },
+      { new: true }
+    ).exec();
+  }
+
   async getUserActivities(userId: any, limit: number = 50) {
     return this.activityModel.find({ user: userId })
       .sort({ timestamp: -1 })

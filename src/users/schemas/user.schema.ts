@@ -25,6 +25,9 @@ export class User {
   @Prop({ type: String, enum: UserStatus, default: UserStatus.OFFLINE })
   currentStatus: UserStatus;
 
+  @Prop({ type: [String], default: [] })
+  trustedDevices: string[];
+
   @Prop({ type: Date })
   lastStatusChange: Date;
 

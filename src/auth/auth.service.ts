@@ -54,8 +54,12 @@ export class AuthService {
       .exec();
   }
 
-  async updateRequestStatus(id: string, status: string) {
-    return this.loginRequestModel.findByIdAndUpdate(id, { status }, { new: true }).exec();
+  async updateRequestStatus(id: string, status: string, trustDevice?: boolean) {
+    const request = await this.loginRequestModel.findByIdAndUpdate(id, { status }, { new: true }).exec();
+    if (status === 'approved' && trustDevice && request) {
+      await this.usersService.addTrustedDevice(request.user.toString(), request.deviceInfo);
+    }
+    return request;
   }
 
   async validateUser(email: string, pass: string): Promise<any> {

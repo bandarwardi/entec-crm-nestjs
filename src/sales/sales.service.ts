@@ -148,12 +148,14 @@ export class SalesService {
       const pipeline: any[] = [
         { $lookup: { from: 'customers', localField: 'customer', foreignField: '_id', as: 'customerData' } },
         { $unwind: '$customerData' },
+        { $addFields: { stringId: { $toString: '$_id' } } },
         {
           $match: {
             $or: [
               { 'customerData.name': { $regex: escapedSearch, $options: 'i' } },
               { 'customerData.phone': { $regex: escapedSearch, $options: 'i' } },
-              { notes: { $regex: escapedSearch, $options: 'i' } }
+              { notes: { $regex: escapedSearch, $options: 'i' } },
+              { stringId: { $regex: escapedSearch, $options: 'i' } }
             ],
             ...filter
           }
@@ -191,12 +193,14 @@ export class SalesService {
       const totalPipeline = [
         { $lookup: { from: 'customers', localField: 'customer', foreignField: '_id', as: 'customerData' } },
         { $unwind: '$customerData' },
+        { $addFields: { stringId: { $toString: '$_id' } } },
         {
           $match: {
             $or: [
               { 'customerData.name': { $regex: escapedSearch, $options: 'i' } },
               { 'customerData.phone': { $regex: escapedSearch, $options: 'i' } },
-              { notes: { $regex: escapedSearch, $options: 'i' } }
+              { notes: { $regex: escapedSearch, $options: 'i' } },
+              { stringId: { $regex: escapedSearch, $options: 'i' } }
             ],
             ...filter
           }
@@ -397,87 +401,95 @@ export class SalesService {
       prevStartDate.setDate(now.getDate() - 60);
     }
 
-    // KPIs
-    const totalOrders = await this.orderModel.countDocuments({ createdAt: { $gte: startDate } }).exec();
-    const prevOrders = await this.orderModel.countDocuments({ createdAt: { $gte: prevStartDate, $lt: startDate } }).exec();
-
-    const revenueResultArr = await this.orderModel.aggregate([
-      { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: startDate } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]).exec();
-    const revenueResult = revenueResultArr[0] || { total: 0 };
-
-    const prevRevenueResultArr = await this.orderModel.aggregate([
-      { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: prevStartDate, $lt: startDate } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]).exec();
-    const prevRevenueResult = prevRevenueResultArr[0] || { total: 0 };
-
-    const totalCustomers = await this.customerModel.countDocuments({ createdAt: { $gte: startDate } }).exec();
-    const prevCustomers = await this.customerModel.countDocuments({ createdAt: { $gte: prevStartDate, $lt: startDate } }).exec();
-
-    const totalLeads = await this.leadModel.countDocuments({ createdAt: { $gte: startDate } }).exec();
-    const prevLeads = await this.leadModel.countDocuments({ createdAt: { $gte: prevStartDate, $lt: startDate } }).exec();
-
-    const recentOrders = await this.orderModel.find()
-      .populate('customer', 'name')
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .exec();
-
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setMonth(now.getMonth() - 11);
     twelveMonthsAgo.setDate(1);
 
-    const revenueByMonth = await this.orderModel.aggregate([
-      { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: twelveMonthsAgo } } },
-      {
-        $group: {
-          _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } },
-          revenue: { $sum: '$amount' }
-        }
-      },
-      { $sort: { _id: 1 } },
-      { $project: { month: '$_id', revenue: 1, _id: 0 } }
-    ]).exec();
+    // Execute all independent queries concurrently
+    const [
+      totalOrders,
+      prevOrders,
+      revenueResultArr,
+      prevRevenueResultArr,
+      totalCustomers,
+      prevCustomers,
+      totalLeads,
+      prevLeads,
+      recentOrders,
+      revenueByMonth,
+      topAgents,
+      ordersByType,
+      leadsFunnel,
+      topStates
+    ] = await Promise.all([
+      this.orderModel.countDocuments({ createdAt: { $gte: startDate } }).exec(),
+      this.orderModel.countDocuments({ createdAt: { $gte: prevStartDate, $lt: startDate } }).exec(),
+      this.orderModel.aggregate([
+        { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: startDate } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]).exec(),
+      this.orderModel.aggregate([
+        { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: prevStartDate, $lt: startDate } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]).exec(),
+      this.customerModel.countDocuments({ createdAt: { $gte: startDate } }).exec(),
+      this.customerModel.countDocuments({ createdAt: { $gte: prevStartDate, $lt: startDate } }).exec(),
+      this.leadModel.countDocuments({ createdAt: { $gte: startDate } }).exec(),
+      this.leadModel.countDocuments({ createdAt: { $gte: prevStartDate, $lt: startDate } }).exec(),
+      this.orderModel.find()
+        .populate('customer', 'name')
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .exec(),
+      this.orderModel.aggregate([
+        { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: twelveMonthsAgo } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } },
+            revenue: { $sum: '$amount' }
+          }
+        },
+        { $sort: { _id: 1 } },
+        { $project: { month: '$_id', revenue: 1, _id: 0 } }
+      ]).exec(),
+      this.orderModel.aggregate([
+        { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: startDate } } },
+        {
+          $group: {
+            _id: '$closerAgent',
+            totalRevenue: { $sum: '$amount' },
+            orderCount: { $sum: 1 }
+          }
+        },
+        { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'agent' } },
+        { $unwind: '$agent' },
+        { $project: { name: '$agent.name', totalRevenue: 1, orderCount: 1, _id: 0 } },
+        { $sort: { totalRevenue: -1 } },
+        { $limit: 5 }
+      ]).exec(),
+      this.orderModel.aggregate([
+        { $match: { createdAt: { $gte: startDate } } },
+        { $group: { _id: '$type', count: { $sum: 1 } } },
+        { $project: { type: '$_id', count: 1, _id: 0 } }
+      ]).exec(),
+      this.leadModel.aggregate([
+        { $match: { createdAt: { $gte: startDate } } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+        { $project: { status: '$_id', count: 1, _id: 0 } }
+      ]).exec(),
+      this.orderModel.aggregate([
+        { $match: { createdAt: { $gte: startDate } } },
+        { $lookup: { from: 'customers', localField: 'customer', foreignField: '_id', as: 'customerData' } },
+        { $unwind: '$customerData' },
+        { $group: { _id: '$customerData.state', count: { $sum: 1 } } },
+        { $project: { name: '$_id', count: 1, _id: 0 } },
+        { $sort: { count: -1 } },
+        { $limit: 5 }
+      ]).exec()
+    ]);
 
-    const topAgents = await this.orderModel.aggregate([
-      { $match: { status: OrderStatus.COMPLETED, createdAt: { $gte: startDate } } },
-      {
-        $group: {
-          _id: '$closerAgent',
-          totalRevenue: { $sum: '$amount' },
-          orderCount: { $sum: 1 }
-        }
-      },
-      { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'agent' } },
-      { $unwind: '$agent' },
-      { $project: { name: '$agent.name', totalRevenue: 1, orderCount: 1, _id: 0 } },
-      { $sort: { totalRevenue: -1 } },
-      { $limit: 5 }
-    ]).exec();
-
-    const ordersByType = await this.orderModel.aggregate([
-      { $match: { createdAt: { $gte: startDate } } },
-      { $group: { _id: '$type', count: { $sum: 1 } } },
-      { $project: { type: '$_id', count: 1, _id: 0 } }
-    ]).exec();
-
-    const leadsFunnel = await this.leadModel.aggregate([
-      { $match: { createdAt: { $gte: startDate } } },
-      { $group: { _id: '$status', count: { $sum: 1 } } },
-      { $project: { status: '$_id', count: 1, _id: 0 } }
-    ]).exec();
-
-    const topStates = await this.orderModel.aggregate([
-      { $match: { createdAt: { $gte: startDate } } },
-      { $lookup: { from: 'customers', localField: 'customer', foreignField: '_id', as: 'customerData' } },
-      { $unwind: '$customerData' },
-      { $group: { _id: '$customerData.state', count: { $sum: 1 } } },
-      { $project: { name: '$_id', count: 1, _id: 0 } },
-      { $sort: { count: -1 } },
-      { $limit: 5 }
-    ]).exec();
+    const revenueResult = revenueResultArr[0] || { total: 0 };
+    const prevRevenueResult = prevRevenueResultArr[0] || { total: 0 };
 
     return {
       kpis: {

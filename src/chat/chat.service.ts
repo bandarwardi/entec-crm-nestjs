@@ -147,13 +147,26 @@ export class ChatService {
   }
 
   async markAsRead(conversationId: string, userId: string) {
-    await this.messageModel.updateMany(
-      {
-        conversation: new Types.ObjectId(conversationId),
-        sender: { $ne: new Types.ObjectId(userId) },
-        isRead: false,
-      },
-      { isRead: true },
-    ).exec();
+    const conversation = await this.conversationModel.findById(conversationId).exec();
+    if (!conversation) return;
+
+    if (conversation.user1.toString() === conversation.user2.toString()) {
+      await this.messageModel.updateMany(
+        {
+          conversation: new Types.ObjectId(conversationId),
+          isRead: false,
+        },
+        { isRead: true },
+      ).exec();
+    } else {
+      await this.messageModel.updateMany(
+        {
+          conversation: new Types.ObjectId(conversationId),
+          sender: { $ne: new Types.ObjectId(userId) },
+          isRead: false,
+        },
+        { isRead: true },
+      ).exec();
+    }
   }
 }

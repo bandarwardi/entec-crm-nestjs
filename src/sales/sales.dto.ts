@@ -116,6 +116,10 @@ export class CreateOrderDto {
   @IsString({ each: true })
   @IsOptional()
   attachments?: string[];
+
+  @IsOptional()
+  @IsString()
+  invoiceFile?: string;
 }
 
 export class UpdateOrderDto extends CreateOrderDto {}

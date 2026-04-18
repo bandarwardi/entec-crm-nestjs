@@ -1,647 +1,214 @@
 <!DOCTYPE html>
-<html lang="ar" dir="ltr">
-
+<html lang="en" dir="ltr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EN TEC - Invoice Template</title>
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@400;600;700;800&display=swap"
-    rel="stylesheet">
+  <title>Invoice #{{orderId}}</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap');
+
     :root {
-      --gold: #c8960c;
-      --page-bg: #ffffff;
-      --text-dark: #111111;
+      --primary: #059669; /* Emerald 600 */
+      --secondary: #0f172a; /* Slate 900 */
+      --gray-50: #f8fafc;
+      --gray-200: #e2e8f0;
+      --gray-500: #64748b;
+      --gray-700: #334155;
+      --white: #ffffff;
     }
 
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: 'Montserrat', sans-serif;
-      background: #e0e0e0;
-    }
-
-    /* ── PAGE SHELL ── */
-    .page {
-      width: 297mm;
-      min-height: 210mm;
-      background: var(--page-bg);
-      margin: 0 auto 12mm;
-      position: relative;
-      overflow: hidden;
-      page-break-after: always;
-    }
-
-    /*
-   * ════════════════════════════════════════
-   *  DYNAMIC IMAGE VARIABLES
-   * ════════════════════════════════════════
-   *
-   *  {{worldMapUrl}}
-   *    → URL or base64 data-URI of the grey
-   *      world map PNG. Used as the background
-   *      on every page. The system stores this
-   *      image once and injects the same URL
-   *      into all 5 pages.
-   *
-   *  {{paymentScreenshot}}
-   *    → URL or base64 of the payment app
-   *      screenshot (Zelle / PayPal) uploaded
-   *      per-invoice by the operator.
-   *
-   *  {{iboScreenshot}}
-   *    → URL or base64 of the IBO Player
-   *      device-info screen screenshot uploaded
-   *      per-invoice by the operator.
-   * ════════════════════════════════════════
-   */
-
-    /* ── MAP BACKGROUND (reused on every page) ── */
-    .map-bg {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      background-size: cover;
-      background-position: center;
-      background-repeat: no-repeat;
-      opacity: 0.2;
-      z-index: 0;
-      pointer-events: none;
-    }
-
-    /* ── CONTENT LAYER ── */
-    .content {
-      position: relative;
-      z-index: 2;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      padding: 10mm 14mm 8mm;
-    }
-
-    /* ── HEADER ── */
-    .header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      margin-bottom: 6mm;
-    }
-
-    .contact-info {
-      font-size: 9pt;
-      font-weight: 600;
-      color: var(--text-dark);
-      line-height: 1.7;
-      min-width: 44mm;
-    }
-
-    .logo-block {
-      text-align: center;
-      flex: 1;
-      padding: 0 8mm;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .logo-img {
-      height: 25mm;
-      width: auto;
-      margin-bottom: 1mm;
-    }
-
-    .logo-title {
-      font-family: 'Bebas Neue', sans-serif;
-      font-size: 44pt;
-      letter-spacing: 6px;
-      color: #111;
-      line-height: 1;
-      margin-bottom: 2px;
-    }
-
-    .logo-subtitle {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .logo-subtitle span {
-      font-size: 7pt;
-      letter-spacing: 5px;
-      color: #555;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-
-    .logo-subtitle .divider {
-      flex: 1;
-      height: 1px;
-      background: #bbb;
-      max-width: 30mm;
-      margin: 0 4mm;
-    }
-
-    .tagline {
-      font-size: 11pt;
-      font-weight: 800;
-      color: var(--text-dark);
-      margin-top: 3px;
-      letter-spacing: 0.5px;
-    }
-
-    /* ── PREMIUM BADGE ── */
-    .badge-wrap {
-      min-width: 44mm;
-      display: flex;
-      align-items: flex-start;
-      justify-content: flex-end;
-    }
-
-    .premium-badge {
-      width: 52px;
-      height: 52px;
-      background: radial-gradient(circle at 35% 35%, #ffe066, #c8960c 60%, #8a6000);
-      border-radius: 50%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      border: 3px solid #f5c842;
-      box-shadow: 0 0 0 2px #c8960c;
-      position: relative;
-      margin-top: 14px;
-    }
-
-    .premium-badge::before {
-      content: '★ ★ ★';
-      position: absolute;
-      top: -14px;
-      font-size: 7px;
-      color: var(--gold);
-      letter-spacing: 3px;
-    }
-
-    .premium-badge .badge-text-top {
-      font-size: 6.5pt;
-      font-weight: 800;
-      color: #fff;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-    }
-
-    .premium-badge .badge-text-pct {
-      font-size: 10pt;
-      font-weight: 800;
-      color: #fff;
-      line-height: 1;
-    }
-
-    /* ── CENTER AREA ── */
-    .center-area {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    /* ── THANK YOU ── */
-    .thankyou-text {
-      font-family: 'Bebas Neue', sans-serif;
-      font-size: 90pt;
-      color: #1a4fa0;
-      letter-spacing: 3px;
-      transform: rotate(-3deg);
-      line-height: 1;
-      text-shadow: 3px 3px 0 rgba(26, 79, 160, 0.12);
-    }
-
-    /* ── ORDER DETAILS ── */
-    .order-block {
-      width: 100%;
-    }
-
-    .order-block h2 {
-      font-size: 12pt;
-      font-weight: 800;
-      margin-bottom: 4mm;
-      color: var(--text-dark);
-    }
-
-    .order-block p {
-      font-size: 9pt;
-      font-weight: 700;
-      line-height: 1.75;
-      margin-bottom: 3mm;
-      color: var(--text-dark);
-    }
-
-    .order-row {
-      display: flex;
-      gap: 10mm;
-      margin: 5mm 0 4mm;
-      flex-wrap: wrap;
-    }
-
-    .order-field {
-      font-size: 9pt;
-      font-weight: 800;
-      color: var(--text-dark);
-    }
-
-    .payment-note {
-      border-left: 3px solid var(--gold);
-      background: rgba(255, 255, 255, 0.55);
-      padding: 4mm 6mm;
-      font-size: 9pt;
-      font-weight: 700;
-      line-height: 1.75;
-      color: var(--text-dark);
-      margin-top: 3mm;
-    }
-
-    /* ── DEVICE INFO ── */
-    .device-block {
-      width: 100%;
-    }
-
-    .device-block h2 {
-      font-size: 12pt;
-      font-weight: 800;
-      margin-bottom: 4mm;
-      color: var(--text-dark);
-    }
-
-    .device-list {
-      list-style: disc;
-      padding-left: 6mm;
-    }
-
-    .device-list li {
-      font-size: 11pt;
-      font-weight: 800;
-      margin-bottom: 3mm;
-      color: var(--text-dark);
+      font-family: 'Tajawal', sans-serif;
+      background-color: var(--white);
+      color: var(--gray-700);
       line-height: 1.5;
     }
 
-    .device-list li em {
-      font-style: normal;
-      color: #c0392b;
+    .page {
+      width: 1122px;
+      height: 794px;
+      margin: 0 auto;
+      background: var(--white);
+      position: relative;
+      overflow: hidden;
     }
 
-    .only-notice {
-      font-size: 10pt;
-      font-weight: 800;
-      color: var(--text-dark);
-      text-align: right;
-      margin-bottom: 3mm;
+    .bg-wrapper {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 0;
+      opacity: 0.04;
+      background-image: url('{{{backgroundImage}}}');
+      background-size: cover;
+      background-position: center;
     }
 
-    /* ── PAYMENT PAGE SCREENSHOTS ── */
-    .screenshots-row {
+    .content {
+      position: relative;
+      z-index: 1;
+      padding: 40px;
+      height: 100%;
       display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10mm;
-      width: 100%;
+      flex-direction: column;
     }
 
-    .screenshot-img {
-      height: 160px;
-      width: auto;
-      max-width: 46%;
-      object-fit: contain;
-      border-radius: 6px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+    .header {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 2px solid var(--gray-200);
+      padding-bottom: 20px;
+      margin-bottom: 30px;
     }
 
-    /* ── NOTICE ── */
-    .notice-block {
-      width: 100%;
-      padding: 0 12mm;
-      text-align: center;
+    .logo-area { display: flex; align-items: center; gap: 15px; }
+    .logo-img { max-height: 70px; border-radius: 8px; }
+    .company h1 { color: var(--secondary); font-size: 24px; font-weight: 900; margin-bottom: 4px; }
+    .company p { color: var(--primary); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+
+    .invoice-title { text-align: right; }
+    .invoice-title h2 { font-size: 32px; font-weight: 900; color: var(--primary); letter-spacing: 2px; }
+    .invoice-title p { font-size: 14px; color: var(--gray-500); font-weight: 700; }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin-bottom: 30px;
     }
 
-    .notice-block h2 {
-      font-size: 18pt;
-      font-weight: 800;
-      margin-bottom: 8mm;
-      color: var(--text-dark);
+    .info-box { background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 12px; padding: 15px; }
+    .info-box h3 { font-size: 11px; text-transform: uppercase; color: var(--primary); margin-bottom: 10px; font-weight: 800; border-bottom: 1px solid var(--gray-200); padding-bottom: 5px; }
+    .info-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; }
+    .info-row span:first-child { color: var(--gray-500); font-weight: 500; }
+    .info-row span:last-child { color: var(--secondary); font-weight: 700; text-align: right; }
+
+    .table-container { border-radius: 12px; overflow: hidden; border: 1px solid var(--gray-200); margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead { background-color: var(--secondary); color: var(--white); }
+    th { padding: 10px 15px; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    td { padding: 10px 15px; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--gray-200); color: var(--secondary); }
+    tbody tr:nth-child(even) { background-color: var(--gray-50); }
+    tbody tr:last-child td { border-bottom: none; }
+
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 20px;
+      margin-top: auto;
     }
 
-    .notice-block p {
-      font-size: 10pt;
-      font-weight: 700;
-      line-height: 1.8;
-      margin-bottom: 5mm;
-      color: var(--text-dark);
-    }
+    .notes h4, .payment h4 { font-size: 12px; color: var(--secondary); font-weight: 800; margin-bottom: 8px; text-transform: uppercase; }
+    .notes-box { background: var(--gray-50); border-left: 4px solid var(--primary); padding: 12px; font-size: 12px; font-weight: 500; border-radius: 0 8px 8px 0; min-height: 60px; }
+    
+    .notice { margin-top: 15px; font-size: 10px; color: #dc2626; background: #fef2f2; padding: 10px; border-radius: 8px; font-weight: 600; line-height: 1.5; }
 
-    /* ── REFERRAL FOOTER ── */
-    .referral-footer {
-      text-align: center;
-      padding: 4mm 0 0;
-      font-size: 9pt;
-      font-weight: 800;
-      line-height: 1.7;
-      color: var(--text-dark);
-    }
+    .total-box { background: var(--secondary); color: var(--white); border-radius: 12px; padding: 20px; }
+    .total-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .total-label { font-size: 14px; font-weight: 700; color: var(--gray-200); }
+    .total-val { font-size: 28px; font-weight: 900; color: #10b981; }
+    .pm { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; font-size: 12px; }
+    .pm span:last-child { font-weight: 800; color: var(--white); }
 
-    .referral-footer .gold {
-      color: var(--gold);
-    }
-
-    @media print {
-      body {
-        background: white;
-      }
-
-      .page {
-        margin: 0;
-        page-break-after: always;
-        box-shadow: none;
-      }
-    }
-
-    @media screen {
-      body {
-        padding: 20px;
-      }
-
-      .page {
-        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
-        border-radius: 2px;
-      }
-    }
+    .footer { margin-top: 20px; padding-top: 15px; border-top: 2px solid var(--gray-200); text-align: center; }
+    .rules { font-size: 12px; font-weight: 700; color: var(--primary); margin-bottom: 8px; }
+    .contact { font-size: 11px; color: var(--gray-500); font-weight: 600; }
   </style>
 </head>
-
 <body>
-
-  <!-- ════════════════════════════════════
-     PAGE 1 — THANK YOU
-════════════════════════════════════ -->
-  <div class="page" id="page-thankyou">
-    <!-- {{backgroundImage}} → base64 encoded world map PNG -->
-    <div class="map-bg" style="background-image: url('{{backgroundImage}}');"></div>
+  <div class="page">
+    <div class="bg-wrapper"></div>
     <div class="content">
+      
       <div class="header">
-        <div class="contact-info">{{companyEmail}}<br>{{companyPhone}}</div>
-        <div class="logo-block">
-          {{#if logoImage}}
-          <img src="{{logoImage}}" class="logo-img" alt="EN TEC Logo">
-          {{else}}
-          <div class="logo-title">{{companyName}}</div>
-          {{/if}}
-          <div class="logo-subtitle">
-            <span>MARKETING</span>
-            <div class="divider"></div><span>COMPANY</span>
+        <div class="logo-area">
+          {{#if logoImage}}<img src="{{{logoImage}}}" class="logo-img">{{/if}}
+          <div class="company">
+            <h1>{{companyName}}</h1>
+            <p>{{tagline}}</p>
           </div>
-          <div class="tagline">{{tagline}}</div>
         </div>
-        <div class="badge-wrap">
-          <div class="premium-badge">
-            <span class="badge-text-top">Premium</span>
-            <span class="badge-text-pct">100%</span>
-          </div>
+        <div class="invoice-title">
+          <h2>INVOICE</h2>
+          <p>#{{orderId}}</p>
         </div>
       </div>
 
-      <div class="center-area">
-        <div class="thankyou-text">Thank you!</div>
-      </div>
-
-      <div class="referral-footer">
-        {{referralRule1}}<br>
-        {{referralRule2}}
-      </div>
-    </div>
-  </div>
-
-
-  <!-- ════════════════════════════════════
-     PAGE 2 — ORDER CONFIRMATION
-════════════════════════════════════ -->
-  <div class="page" id="page-order">
-    <div class="map-bg" style="background-image: url('{{backgroundImage}}');"></div>
-    <div class="content">
-      <div class="header">
-        <div class="contact-info">info@entec.store<br>+1 (223) 203-0312</div>
-        <div class="logo-block">
-          {{#if logoImage}}
-          <img src="{{logoImage}}" class="logo-img" alt="EN TEC Logo">
-          {{else}}
-          <div class="logo-title">EN TEC</div>
-          {{/if}}
-          <div class="logo-subtitle">
-            <span>MARKETING</span>
-            <div class="divider"></div><span>COMPANY</span>
-          </div>
-          <div class="tagline">Our word is a guarantee</div>
+      <div class="info-grid">
+        <div class="info-box">
+          <h3>Customer Details</h3>
+          <div class="info-row"><span>Name:</span> <span>{{customerName}}</span></div>
+          <div class="info-row"><span>Phone:</span> <span dir="ltr">{{customerPhone}}</span></div>
+          <div class="info-row"><span>Email:</span> <span>{{customerEmail}}</span></div>
         </div>
-        <div class="badge-wrap">
-          <div class="premium-badge">
-            <span class="badge-text-top">Premium</span>
-            <span class="badge-text-pct">100%</span>
-          </div>
+        <div class="info-box">
+          <h3>Timeline</h3>
+          <div class="info-row"><span>Order Date:</span> <span>{{orderDate}}</span></div>
+          <div class="info-row"><span>App Expiry:</span> <span>{{expirationDate}}</span></div>
+          <div class="info-row"><span>Server Expiry:</span> <span>{{serverExpiryDate}}</span></div>
+        </div>
+        <div class="info-box">
+          <h3>Service Info</h3>
+          <div class="info-row"><span>App Type:</span> <span>{{appType}} ({{appYears}}y)</span></div>
+          <div class="info-row"><span>Server Name:</span> <span>{{serverName}}</span></div>
         </div>
       </div>
 
-      <div class="center-area" style="align-items:flex-start;padding-top:2mm;">
-        <div class="order-block">
-          <h2>Order Confirmation for {{appType}} App Subscription (#INV-{{orderId}})</h2>
-          <p>
-            Thank you for subscribing to the {{appType}} App <strong>{{customerName}}</strong>. We appreciate your
-            choice and are committed to delivering exceptional value.
-          </p>
-          <p><strong>Order Details:</strong></p>
-          <div class="order-row">
-            <div class="order-field">Order Date: {{orderDate}}</div>
-            <div class="order-field">Expiration Date: {{expirationDate}}</div>
-            <div class="order-field">Payment Method: {{paymentMethod}}</div>
-            <div class="order-field">Amount: ${{amount}}</div>
-          </div>
-          <div class="order-row">
-            <div class="order-field">Server Name: {{serverName}}</div>
-            <div class="order-field">App Type: {{appType}}</div>
-            <div class="order-field">Subscription Term: {{appYears}} Year(s)</div>
-          </div>
-          <div class="order-row">
-            <div class="order-field">Phone: {{customerPhone}}</div>
-            <div class="order-field">Email: {{customerEmail}}</div>
-          </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 5%;">#</th>
+              <th style="width: 35%;">MAC Address</th>
+              <th style="width: 30%;">Device Key</th>
+              <th style="width: 30%;">Device Name</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{#if devices.length}}
+              {{#each devices}}
+              <tr>
+                <td>{{@index}}</td>
+                <td style="font-family: monospace;">{{this.macAddress}}</td>
+                <td style="font-family: monospace;">{{this.deviceKey}}</td>
+                <td>{{this.deviceName}}</td>
+              </tr>
+              {{/each}}
+            {{else}}
+              <tr><td colspan="4" style="text-align: center; color: #64748b;">No devices linked.</td></tr>
+            {{/if}}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="bottom-grid">
+        <div class="notes">
           {{#if notes}}
-          <div class="payment-note" style="margin-top: 2mm;">
-            <strong>Notes:</strong> {{notes}}
-          </div>
+            <h4>Order Notes</h4>
+            <div class="notes-box">{{notes}}</div>
           {{/if}}
-          <div class="payment-note">
-            {{{noticeText}}}
+          <div class="notice">{{{noticeText}}}</div>
+        </div>
+
+        <div class="payment">
+          <h4>Payment Summary</h4>
+          <div class="total-box">
+            <div class="total-row"><span class="total-label">Total Amount</span></div>
+            <div class="total-row"><span class="total-val">${{amount}}</span></div>
+            <div class="pm">
+              <span>Method:</span>
+              <span>{{paymentMethod}}</span>
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="referral-footer">
-        When you refer a customer, <span class="gold">3 months will be added to your subscription.</span><br>
-        If you refer 4 customers, <span class="gold">a free year will be added to your subscription.</span>
+      <div class="footer">
+        <div class="rules">🌟 {{referralRule1}} &nbsp;|&nbsp; 🎁 {{referralRule2}}</div>
+        <div class="contact">{{companyEmail}} &nbsp;&nbsp;&bull;&nbsp;&nbsp; {{companyPhone}}</div>
       </div>
+
     </div>
   </div>
-
-
-  <!-- ════════════════════════════════════
-     PAGE 3 — DEVICE INFORMATION
-════════════════════════════════════ -->
-  <div class="page" id="page-device">
-    <div class="map-bg" style="background-image: url('{{backgroundImage}}');"></div>
-    <div class="content">
-      <div class="header">
-        <div class="contact-info">info@entec.store<br>+1 (223) 203-0312</div>
-        <div class="logo-block">
-          {{#if logoImage}}
-          <img src="{{logoImage}}" class="logo-img" alt="EN TEC Logo">
-          {{else}}
-          <div class="logo-title">EN TEC</div>
-          {{/if}}
-          <div class="logo-subtitle">
-            <span>MARKETING</span>
-            <div class="divider"></div><span>COMPANY</span>
-          </div>
-          <div class="tagline">Our word is a guarantee</div>
-        </div>
-        <div class="badge-wrap">
-          <div class="premium-badge">
-            <span class="badge-text-top">Premium</span>
-            <span class="badge-text-pct">100%</span>
-          </div>
-        </div>
-      </div>
-
-      <div style="text-align:right;padding:0 0 3mm;">
-        <div class="only-notice">Only 1 account works on 1 TVs and 0 mobile</div>
-      </div>
-
-      <div class="center-area" style="align-items:flex-start;padding-top:2mm;">
-        <div class="device-block">
-          <h2>Device Information:</h2>
-          <div style="display: flex; flex-wrap: wrap; gap: 10mm;">
-            {{#each devices}}
-            <ul class="device-list" style="flex: 1; min-width: 45%;">
-              <li>Device Name: {{this.deviceName}}</li>
-              <li>MAC Address: {{this.macAddress}}</li>
-              <li>Device Key: {{this.deviceKey}}</li>
-            </ul>
-            {{/each}}
-          </div>
-        </div>
-      </div>
-
-      <div class="referral-footer">
-        When you refer a customer, <span class="gold">3 months will be added to your subscription.</span><br>
-        If you refer 4 customers, <span class="gold">a free year will be added to your subscription.</span>
-      </div>
-    </div>
-  </div>
-
-
-  <!-- ════════════════════════════════════
-     PAGE 4 — PAYMENT PROOF SCREENSHOTS
-     ────────────────────────────────────
-     {{paymentScreenshot}}
-       Replaced by the system with the URL
-       or base64 data-URI of the payment app
-       screenshot (Zelle / PayPal) that was
-       uploaded by the operator for this order.
-
-     {{iboScreenshot}}
-       Replaced by the system with the URL
-       or base64 data-URI of the IBO Player
-       device screen screenshot uploaded by
-       the operator for this order.
-════════════════════════════════════ -->
-  <div class="page" id="page-payment">
-    <div class="map-bg" style="background-image: url('{{backgroundImage}}');"></div>
-    <div class="content">
-      <div class="header">
-        <div class="contact-info">info@entec.store<br>+1 (223) 203-0312</div>
-        <div class="logo-block">
-          {{#if logoImage}}
-          <img src="{{logoImage}}" class="logo-img" alt="EN TEC Logo">
-          {{else}}
-          <div class="logo-title">EN TEC</div>
-          {{/if}}
-          <div class="logo-subtitle">
-            <span>MARKETING</span>
-            <div class="divider"></div><span>COMPANY</span>
-          </div>
-          <div class="tagline">Our word is a guarantee</div>
-        </div>
-        <div class="badge-wrap">
-          <div class="premium-badge">
-            <span class="badge-text-top">Premium</span>
-            <span class="badge-text-pct">100%</span>
-          </div>
-        </div>
-      </div>
-      <div class="center-area">
-        <div class="screenshots-row" style="flex-wrap: wrap;">
-          {{#each attachments}}
-          <img class="screenshot-img" src="{{this}}" alt="Attachment">
-          {{/each}}
-        </div>
-      </div>
-    </div>
-  </div>
-
-
-  <!-- ════════════════════════════════════
-     PAGE 5 — NOTICE
-════════════════════════════════════ -->
-  <div class="page" id="page-notice">
-    <div class="map-bg" style="background-image: url('{{backgroundImage}}');"></div>
-    <div class="content">
-      <div class="header">
-        <div class="contact-info">info@entec.store<br>+1 (223) 203-0312</div>
-        <div class="logo-block">
-          {{#if logoImage}}
-          <img src="{{logoImage}}" class="logo-img" alt="EN TEC Logo">
-          {{else}}
-          <div class="logo-title">EN TEC</div>
-          {{/if}}
-          <div class="logo-subtitle">
-            <span>MARKETING</span>
-            <div class="divider"></div><span>COMPANY</span>
-          </div>
-          <div class="tagline">Our word is a guarantee</div>
-        </div>
-        <div class="badge-wrap">
-          <div class="premium-badge">
-            <span class="badge-text-top">Premium</span>
-            <span class="badge-text-pct">100%</span>
-          </div>
-        </div>
-      </div>
-      <div class="center-area">
-        <div class="notice-block">
-          <h2>notice</h2>
-          <p>
-            {{{noticeText}}}
-          </p>
-          <p>
-            Best regards, <strong>{{companyName}} Team</strong>
-          </p>
-        </div>
-      </div>
-    </div>
-  </div>
-
 </body>
-
 </html>

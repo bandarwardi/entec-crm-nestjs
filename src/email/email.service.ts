@@ -28,13 +28,14 @@ export class EmailService {
     });
   }
 
-  async sendMail(to: string, subject: string, text: string, attachments?: any[]) {
+  async sendMail(to: string, subject: string, text: string, html?: string, attachments?: any[]) {
     try {
       const info = await this.transporter.sendMail({
         from: this.configService.get<string>('SMTP_FROM', '"EN TEC" <noreply@entec.com>'),
         to,
         subject,
         text,
+        html,
         attachments,
       });
       this.logger.log(`Email sent: ${info.messageId}`);

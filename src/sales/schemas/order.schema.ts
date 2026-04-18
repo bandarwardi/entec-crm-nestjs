@@ -56,6 +56,9 @@ export class Order {
   @Prop({ type: [String] })
   attachments: string[];
 
+  @Prop()
+  invoiceFile: string;
+
   id: string;
   createdAt: Date;
   updatedAt: Date;

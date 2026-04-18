@@ -273,6 +273,7 @@ export class SalesService {
     });
 
     const savedOrder = await order.save();
+    await savedOrder.populate('customer leadAgent closerAgent');
     await this.invalidateDashboardCache();
     return savedOrder;
   }
@@ -304,7 +305,9 @@ export class SalesService {
     }
 
     const updated = await this.orderModel.findByIdAndUpdate(id, updateData, { new: true }).exec();
-
+    if (updated) {
+      await updated.populate('customer leadAgent closerAgent');
+    }
     await this.invalidateDashboardCache();
     return updated;
   }
@@ -536,32 +539,67 @@ export class SalesService {
       throw new NotFoundException('Order not found');
     }
 
+    if (!order.invoiceFile) {
+      console.error(`[Invoice] Order #${orderId} does not have an attached invoice file`);
+      throw new BadRequestException('No invoice file attached to this order. Please upload an invoice first.');
+    }
+
     const customerEmail = (order.customer as any).email;
     if (!customerEmail) {
       console.error(`[Invoice] Customer ${(order.customer as any).name} has no email`);
       throw new BadRequestException('Customer does not have an email address');
     }
 
-    console.log(`[Invoice] Generating PDF buffer...`);
-    const settings = await this.getInvoiceSettings();
-    let pdfBuffer: Buffer;
+    console.log(`[Invoice] Fetching attached invoice from ${order.invoiceFile}`);
+    let fileBuffer: Buffer;
+    let mimeType = 'application/pdf';
+    let filename = `Invoice-INV-${order._id}.pdf`;
+    
     try {
-      pdfBuffer = await this.invoicePdfService.generateInvoiceBuffer(order, settings);
-      console.log(`[Invoice] PDF buffer generated successfully (Size: ${pdfBuffer.length} bytes)`);
-    } catch (pdfError) {
-      console.error(`[Invoice] PDF generation FAILED:`, pdfError);
-      throw new Error(`Failed to generate PDF: ${pdfError.message}`);
+      const response = await fetch(order.invoiceFile);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch file: HTTP ${response.status}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      fileBuffer = Buffer.from(arrayBuffer);
+      const contentType = response.headers.get('content-type');
+      if (contentType) {
+        mimeType = contentType.split(';')[0].trim();
+      }
+      // Infer filename from URL or mime
+      const urlParts = order.invoiceFile.split('/');
+      const lastPart = urlParts[urlParts.length - 1];
+      if (lastPart && lastPart.includes('.')) {
+         filename = lastPart;
+      } else if (mimeType.includes('image/')) {
+         filename = `Invoice-INV-${order._id}.${mimeType.split('/')[1]}`;
+      }
+      console.log(`[Invoice] File fetched successfully (Size: ${fileBuffer.length} bytes, Type: ${mimeType})`);
+    } catch (err) {
+      console.error(`[Invoice] Failed to fetch invoice file:`, err);
+      throw new Error(`Failed to fetch invoice file: ${err.message}`);
     }
 
     const subject = `Invoice for Order #${order._id} - EN TEC`;
     const text = `Dear ${(order.customer as any).name},\n\nPlease find attached the invoice for your order #${order._id}.\n\nThank you for your business!`;
+    const html = `
+      <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+        <h2>Thank you for your business!</h2>
+        <p>Dear <strong>${(order.customer as any).name}</strong>,</p>
+        <p>Please find attached the invoice for your order <strong>#${order._id}</strong>.</p>
+        <p>If you have any questions, feel free to reply to this email.</p>
+        <br/>
+        <p>Best regards,<br/><strong>EN TEC Team</strong></p>
+      </div>
+    `;
 
     console.log(`[Invoice] Sending email to ${customerEmail}...`);
     try {
-      await this.emailService.sendMail(customerEmail, subject, text, [
+      await this.emailService.sendMail(customerEmail, subject, text, html, [
         {
-          filename: `Invoice-INV-${order._id}.pdf`,
-          content: pdfBuffer,
+          filename: filename,
+          content: fileBuffer,
+          contentType: mimeType
         },
       ]);
       console.log(`[Invoice] Email sent SUCCESSFULLY to ${customerEmail}`);

@@ -7,6 +7,7 @@ import { WhatsappSession, WhatsappSessionSchema } from './schemas/whatsapp-sessi
 import { WhatsappService } from './whatsapp.service';
 import { WhatsappController } from './whatsapp.controller';
 import { WhatsappGateway } from './whatsapp.gateway';
+import { WhatsappProcessor } from './whatsapp.processor';
 import { Lead, LeadSchema } from '../leads/schemas/lead.schema';
 
 @Module({
@@ -22,7 +23,7 @@ import { Lead, LeadSchema } from '../leads/schemas/lead.schema';
     }),
   ],
   controllers: [WhatsappController],
-  providers: [WhatsappService, WhatsappGateway],
+  providers: [WhatsappService, WhatsappGateway, WhatsappProcessor],
   exports: [WhatsappService],
 })
 export class WhatsappModule {}

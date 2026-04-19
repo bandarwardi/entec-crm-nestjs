@@ -29,15 +29,15 @@ export class WhatsappGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   sendQrUpdate(sessionId: string, qrCode: string) {
-    this.server.emit(`wa:qr:${sessionId}`, { qrCode });
+    this.server.to(`session:${sessionId}`).emit(`wa:qr:${sessionId}`, { qrCode });
   }
 
   sendStatusUpdate(sessionId: string, status: string) {
-    this.server.emit(`wa:status:${sessionId}`, { status });
+    this.server.to(`session:${sessionId}`).emit(`wa:status:${sessionId}`, { status });
   }
 
   sendNewMessage(sessionId: string, message: any) {
-    this.server.emit(`wa:message:${sessionId}`, message);
+    this.server.to(`session:${sessionId}`).emit(`wa:message:${sessionId}`, message);
   }
 
   @SubscribeMessage('join:session')

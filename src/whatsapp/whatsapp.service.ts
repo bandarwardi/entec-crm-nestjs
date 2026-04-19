@@ -1,6 +1,8 @@
 import { Injectable, OnModuleInit, Logger, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import makeWASocket, { 
   DisconnectReason, 
   fetchLatestBaileysVersion, 
@@ -29,6 +31,7 @@ export class WhatsappService implements OnModuleInit {
     @InjectModel(WhatsappSession.name) private sessionModel: Model<WhatsappSessionDocument>,
     @InjectModel(Lead.name) private leadModel: Model<LeadDocument>,
     private readonly gateway: WhatsappGateway,
+    @InjectQueue('whatsapp-messages') private messageQueue: Queue,
   ) {}
 
   async onModuleInit() {
@@ -222,6 +225,30 @@ export class WhatsappService implements OnModuleInit {
   }
 
   async sendMessage(channelId: string, leadId: string, content: string, agentId: string) {
+    const channel = await this.channelModel.findById(channelId);
+    if (!channel) throw new NotFoundException('Channel not found');
+
+    const lead = await this.leadModel.findById(leadId);
+    if (!lead) throw new NotFoundException('Lead not found');
+
+    // Add to queue instead of sending immediately
+    const job = await this.messageQueue.add('send-message', {
+      channelId,
+      leadId,
+      content,
+      agentId
+    }, {
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 5000
+      }
+    });
+
+    return { jobId: job.id, status: 'queued' };
+  }
+
+  async sendDirectMessage(channelId: string, leadId: string, content: string, agentId: string) {
     const channel = await this.channelModel.findById(channelId);
     if (!channel) throw new NotFoundException('Channel not found');
 

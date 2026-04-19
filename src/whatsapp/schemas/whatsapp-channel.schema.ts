@@ -3,7 +3,18 @@ import { Document, Types } from 'mongoose';
 
 export type WhatsappChannelDocument = WhatsappChannel & Document;
 
-@Schema({ timestamps: true })
+@Schema({ 
+  timestamps: true,
+  toJSON: {
+    virtuals: true,
+    versionKey: false,
+    transform: (doc, ret) => {
+      ret.id = ret._id;
+      delete ret._id;
+    }
+  },
+  toObject: { virtuals: true }
+})
 export class WhatsappChannel {
   @Prop({ required: true })
   phoneNumber: string;

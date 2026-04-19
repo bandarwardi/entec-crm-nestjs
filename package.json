@@ -22,6 +22,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@nestjs-modules/ioredis": "^2.2.1",
+    "@nestjs/bullmq": "^11.0.4",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.0.1",
@@ -31,9 +32,13 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/schedule": "^6.1.1",
     "@nestjs/serve-static": "^5.0.4",
+    "@nestjs/websockets": "^11.1.19",
     "@types/cron": "^2.0.1",
     "@types/luxon": "^3.7.1",
+    "@types/qrcode": "^1.5.6",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "bcrypt": "^6.0.0",
+    "bullmq": "^5.74.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "form-data": "^4.0.5",
@@ -47,9 +52,12 @@
     "nodemailer": "^8.0.5",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
+    "pino": "^10.3.1",
     "puppeteer": "^24.40.0",
+    "qrcode": "^1.5.4",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

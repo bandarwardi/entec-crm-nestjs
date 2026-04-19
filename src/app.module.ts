@@ -14,6 +14,8 @@ import { ChatModule } from './chat/chat.module';
 import { AiChatModule } from './ai-chat/ai-chat.module';
 import { WorkSettingsModule } from './work-settings/work-settings.module';
 import { EmailModule } from './email/email.module';
+import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { BullModule } from '@nestjs/bullmq';
 
 @Module({
   imports: [
@@ -27,6 +29,17 @@ import { EmailModule } from './email/email.module';
         uri: configService.get<string>('MONGO_URI'),
       }),
     }),
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        connection: {
+          host: configService.get('REDIS_HOST') || 'localhost',
+          port: configService.get('REDIS_PORT') || 6379,
+          password: configService.get('REDIS_PASSWORD'),
+        },
+      }),
+    }),
     AuthModule,
     UsersModule,
     LeadsModule,
@@ -35,6 +48,7 @@ import { EmailModule } from './email/email.module';
     AiChatModule,
     WorkSettingsModule,
     EmailModule,
+    WhatsappModule,
     CommonModule,
     ScheduleModule.forRoot(),
     RedisModule.forRootAsync({

@@ -18,6 +18,18 @@ export class Lead {
   @Prop()
   notes: string;
 
+  @Prop()
+  currentPlatform: string;
+
+  @Prop()
+  currentDevice: string;
+
+  @Prop()
+  subscriptionAmount: number;
+
+  @Prop()
+  subscriptionDuration: number;
+
   @Prop({ type: String, enum: LeadStatus, default: LeadStatus.NEW })
   status: LeadStatus;
 

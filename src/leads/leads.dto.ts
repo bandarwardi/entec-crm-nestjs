@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsEnum, IsDateString } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsEnum, IsDateString, IsNumber } from 'class-validator';
 import { LeadStatus } from './lead-status.enum';
 
 export class CreateLeadDto {
@@ -29,6 +29,22 @@ export class CreateLeadDto {
   @IsString()
   @IsOptional()
   reminderNote?: string;
+
+  @IsString()
+  @IsOptional()
+  currentPlatform?: string;
+
+  @IsString()
+  @IsOptional()
+  currentDevice?: string;
+
+  @IsNumber()
+  @IsOptional()
+  subscriptionAmount?: number;
+
+  @IsNumber()
+  @IsOptional()
+  subscriptionDuration?: number;
 }
 
 export class UpdateLeadDto {
@@ -59,6 +75,22 @@ export class UpdateLeadDto {
   @IsString()
   @IsOptional()
   reminderNote?: string;
+
+  @IsString()
+  @IsOptional()
+  currentPlatform?: string;
+
+  @IsString()
+  @IsOptional()
+  currentDevice?: string;
+
+  @IsNumber()
+  @IsOptional()
+  subscriptionAmount?: number;
+
+  @IsNumber()
+  @IsOptional()
+  subscriptionDuration?: number;
 }
 
 export class QueryLeadsDto {

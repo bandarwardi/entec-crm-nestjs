@@ -84,7 +84,9 @@ export class LeadsService {
   }
 
   async update(id: string, dto: UpdateLeadDto) {
-    const lead = await this.leadModel.findByIdAndUpdate(id, dto, { new: true }).exec();
+    const lead = await this.leadModel.findByIdAndUpdate(id, dto, { new: true })
+      .populate('createdBy', 'id name email role')
+      .exec();
     if (!lead) throw new NotFoundException('العميل المحتمل غير موجود، تعذر التحديث');
 
     await this.cacheService.invalidateByPattern('dashboard:stats:*');

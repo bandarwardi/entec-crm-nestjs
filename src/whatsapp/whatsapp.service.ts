@@ -13,6 +13,7 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import * as qrcode from 'qrcode';
+import * as pino from 'pino';
 import { WhatsappChannel, WhatsappChannelDocument } from './schemas/whatsapp-channel.schema';
 import { WhatsappMessage, WhatsappMessageDocument } from './schemas/whatsapp-message.schema';
 import { WhatsappSession, WhatsappSessionDocument } from './schemas/whatsapp-session.schema';
@@ -26,6 +27,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 @Injectable()
 export class WhatsappService implements OnModuleInit {
   private readonly logger = new Logger(WhatsappService.name);
+  private readonly pinoLogger = pino({ level: 'silent' });
   private sessions = new Map<string, WASocket>();
 
   constructor(
@@ -69,10 +71,11 @@ export class WhatsappService implements OnModuleInit {
         printQRInTerminal: false,
         auth: {
           creds: state.creds,
-          keys: makeCacheableSignalKeyStore(state.keys, this.logger as any),
+          keys: makeCacheableSignalKeyStore(state.keys, this.pinoLogger as any),
         },
         browser: ['EN TEC CRM', 'Chrome', '1.0.0'],
         generateHighQualityLinkPreview: true,
+        logger: this.pinoLogger as any,
       });
 
       this.sessions.set(sessionId, sock);

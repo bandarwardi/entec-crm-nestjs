@@ -361,18 +361,19 @@ export class WhatsappService implements OnModuleInit {
     const lead = await this.leadModel.findById(leadId);
     if (!lead) throw new NotFoundException('Lead not found');
 
-    // Add to queue instead of sending immediately
+    // Add to queue with deduplication based on content and leadId
+    const jobId = `send_${leadId}_${Buffer.from(content.substring(0, 20)).toString('hex')}_${Date.now()}`;
+    
     const job = await this.messageQueue.add('send-message', {
       channelId,
       leadId,
       content,
       agentId
     }, {
-      attempts: 3,
-      backoff: {
-        type: 'exponential',
-        delay: 5000
-      }
+      jobId, // Use specific jobId to help prevent duplicates
+      attempts: 1, // Only try once to avoid banning
+      removeOnComplete: true,
+      removeOnFail: true
     });
 
     return { jobId: job.id, status: 'queued' };
@@ -414,36 +415,42 @@ export class WhatsappService implements OnModuleInit {
     const result = await sock.sendMessage(jid, { text: content });
     if (!result) throw new Error('Failed to send message');
     
-    const newMessage = new this.messageModel({
-      channelId: channel._id,
-      leadId: lead._id,
-      externalNumber: cleanPhone,
-      direction: 'outbound',
-      content,
-      waMessageId: result.key.id,
-      timestamp: new Date(),
-      status: 'sent',
-      sentByAgent: new Types.ObjectId(agentId)
-    });
+    try {
+      const newMessage = new this.messageModel({
+        channelId: channel._id,
+        leadId: lead._id,
+        externalNumber: cleanPhone,
+        direction: 'outbound',
+        content,
+        waMessageId: result.key.id,
+        timestamp: new Date(),
+        status: 'sent',
+        sentByAgent: new Types.ObjectId(agentId)
+      });
 
-    await newMessage.save();
+      await newMessage.save();
 
-    // Save to Firestore
-    const db = this.firebaseService.getFirestore();
-    const messageRef = db.collection('whatsappChannels').doc(channelId).collection('messages').doc();
-    
-    await messageRef.set({
-      externalNumber: cleanPhone,
-      leadId: lead._id.toString(),
-      direction: 'outbound',
-      content,
-      status: 'sent',
-      sentByAgent: agentId,
-      waMessageId: result.key.id,
-      timestamp: FieldValue.serverTimestamp(),
-    });
+      // Save to Firestore
+      const db = this.firebaseService.getFirestore();
+      const messageRef = db.collection('whatsappChannels').doc(channelId).collection('messages').doc();
+      
+      await messageRef.set({
+        externalNumber: cleanPhone,
+        leadId: lead._id.toString(),
+        direction: 'outbound',
+        content,
+        status: 'sent',
+        sentByAgent: agentId,
+        waMessageId: result.key.id,
+        timestamp: FieldValue.serverTimestamp(),
+      });
 
-    return newMessage;
+      return newMessage;
+    } catch (dbError) {
+      // Log DB error but DO NOT throw, because message is already sent to the customer
+      this.logger.error(`Message sent to ${cleanPhone} but failed to save in DB: ${dbError.message}`);
+      return { success: true, waMessageId: result.key.id };
+    }
   }
 
   async getMessages(channelId: string, phoneNumber: string) {

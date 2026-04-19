@@ -32,13 +32,19 @@ import { BullModule } from '@nestjs/bullmq';
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get('REDIS_HOST') || 'localhost',
-          port: configService.get('REDIS_PORT') || 6379,
-          password: configService.get('REDIS_PASSWORD'),
-        },
-      }),
+      useFactory: (configService: ConfigService) => {
+        const url = configService.get<string>('REDIS_URL');
+        if (url) {
+          return { connection: new URL(url) };
+        }
+        return {
+          connection: {
+            host: configService.get('REDIS_HOST') || 'localhost',
+            port: configService.get('REDIS_PORT') || 6379,
+            password: configService.get('REDIS_PASSWORD'),
+          },
+        };
+      },
     }),
     AuthModule,
     UsersModule,
@@ -54,15 +60,22 @@ import { BullModule } from '@nestjs/bullmq';
     RedisModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        type: 'single',
-        url: `redis://${configService.get('REDIS_HOST') || 'localhost'}:${configService.get('REDIS_PORT') || 6379}`,
-        options: {
-          password: configService.get('REDIS_PASSWORD') || undefined,
-          maxRetriesPerRequest: null, // Keep trying without throwing error
-          enableOfflineQueue: false, // Don't queue commands when offline
-        },
-      }),
+      useFactory: (configService: ConfigService) => {
+        const url = configService.get<string>('REDIS_URL');
+        if (url) {
+          return {
+            type: 'single',
+            url: url,
+          };
+        }
+        return {
+          type: 'single',
+          url: `redis://${configService.get('REDIS_HOST') || 'localhost'}:${configService.get('REDIS_PORT') || 6379}`,
+          options: {
+            password: configService.get('REDIS_PASSWORD'),
+          },
+        };
+      },
     }),
   ],
   controllers: [AppController],

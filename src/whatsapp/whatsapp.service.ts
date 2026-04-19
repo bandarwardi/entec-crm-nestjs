@@ -379,15 +379,32 @@ export class WhatsappService implements OnModuleInit {
   }
 
   async sendDirectMessage(channelId: string, leadId: string, content: string, agentId: string) {
+    this.logger.log(`sendDirectMessage: Attempting to send message to lead ${leadId} via channel ${channelId}`);
+    
     const channel = await this.channelModel.findById(channelId);
-    if (!channel) throw new NotFoundException('Channel not found');
+    if (!channel) {
+      this.logger.error(`sendDirectMessage: Channel ${channelId} not found`);
+      throw new NotFoundException('Channel not found');
+    }
 
     const lead = await this.leadModel.findById(leadId);
-    if (!lead) throw new NotFoundException('Lead not found');
+    if (!lead) {
+      this.logger.error(`sendDirectMessage: Lead ${leadId} not found`);
+      throw new NotFoundException('Lead not found');
+    }
 
-    const sock = this.sessions.get(channel.sessionId);
+    let sock = this.sessions.get(channel.sessionId);
+    
+    // Auto-reinit if status is connected but session is missing from memory (e.g. after restart)
+    if (!sock && channel.status === 'connected') {
+      this.logger.warn(`sendDirectMessage: Channel ${channel.label} is marked connected but session is missing. Re-initializing...`);
+      sock = await this.initSession(channel);
+    }
+
     if (!sock || channel.status !== 'connected') {
-      throw new Error('WhatsApp channel is not connected');
+      const reason = !sock ? 'Session missing' : `Channel status is ${channel.status}`;
+      this.logger.error(`sendDirectMessage: WhatsApp channel ${channel.label} is not connected. Reason: ${reason}`);
+      throw new Error(`WhatsApp channel is not connected (${reason})`);
     }
 
     // Clean phone number: remove any non-digit except possibly a + at start

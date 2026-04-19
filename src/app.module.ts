@@ -35,14 +35,23 @@ import { BullModule } from '@nestjs/bullmq';
       useFactory: (configService: ConfigService) => {
         const url = configService.get<string>('REDIS_URL');
         if (url) {
-          return {
-            connection: url,
-          };
+          try {
+            const parsedUrl = new URL(url);
+            return {
+              connection: {
+                host: parsedUrl.hostname,
+                port: parseInt(parsedUrl.port) || 6379,
+                password: parsedUrl.password || undefined,
+              },
+            };
+          } catch (e) {
+            // Fallback if URL parsing fails
+          }
         }
         return {
           connection: {
             host: configService.get('REDIS_HOST') || 'localhost',
-            port: parseInt(configService.get('REDIS_PORT')) || 6379,
+            port: parseInt(configService.get('REDIS_PORT')!) || 6379,
             password: configService.get('REDIS_PASSWORD'),
           },
         };

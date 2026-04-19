@@ -16,9 +16,12 @@ import * as qrcode from 'qrcode';
 import { WhatsappChannel, WhatsappChannelDocument } from './schemas/whatsapp-channel.schema';
 import { WhatsappMessage, WhatsappMessageDocument } from './schemas/whatsapp-message.schema';
 import { WhatsappSession, WhatsappSessionDocument } from './schemas/whatsapp-session.schema';
-import { WhatsappGateway } from './whatsapp.gateway';
 import { useMongoDBAuthState } from './mongodb-auth';
 import { Lead, LeadDocument } from '../leads/schemas/lead.schema';
+import { UsersService } from '../users/users.service';
+import { FirebaseService } from '../firebase/firebase.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { FieldValue } from 'firebase-admin/firestore';
 
 @Injectable()
 export class WhatsappService implements OnModuleInit {
@@ -30,7 +33,9 @@ export class WhatsappService implements OnModuleInit {
     @InjectModel(WhatsappMessage.name) private messageModel: Model<WhatsappMessageDocument>,
     @InjectModel(WhatsappSession.name) private sessionModel: Model<WhatsappSessionDocument>,
     @InjectModel(Lead.name) private leadModel: Model<LeadDocument>,
-    private readonly gateway: WhatsappGateway,
+    private readonly usersService: UsersService,
+    private readonly firebaseService: FirebaseService,
+    private readonly notificationsService: NotificationsService,
     @InjectQueue('whatsapp-messages') private messageQueue: Queue,
   ) {}
 
@@ -76,6 +81,8 @@ export class WhatsappService implements OnModuleInit {
 
       sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
+        const db = this.firebaseService.getFirestore();
+        const channelRef = db.collection('whatsappChannels').doc(channelId);
 
         if (qr) {
           const qrBase64 = await qrcode.toDataURL(qr);
@@ -83,15 +90,25 @@ export class WhatsappService implements OnModuleInit {
             qrCode: qrBase64,
             status: 'qr_pending'
           });
-          this.gateway.sendQrUpdate(sessionId, qrBase64);
+
+          await channelRef.set({
+            qrCode: qrBase64,
+            status: 'qr_pending',
+            updatedAt: FieldValue.serverTimestamp()
+          }, { merge: true });
         }
 
         if (connection === 'close') {
           const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
           this.logger.log(`Connection closed for ${sessionId}. Reconnect: ${shouldReconnect}`);
           
-          await this.channelModel.findByIdAndUpdate(channelId, { status: 'disconnected', qrCode: null });
-          this.gateway.sendStatusUpdate(sessionId, 'disconnected');
+          await this.channelModel.findByIdAndUpdate(channelId, { status: 'disconnected', qrCode: undefined });
+          
+          await channelRef.set({
+            status: 'disconnected',
+            qrCode: '',
+            updatedAt: FieldValue.serverTimestamp()
+          }, { merge: true });
 
           if (shouldReconnect) {
             setTimeout(() => this.initSession(channel), 5000);
@@ -101,13 +118,33 @@ export class WhatsappService implements OnModuleInit {
         } else if (connection === 'open') {
           this.logger.log(`Connection opened for ${sessionId}`);
           const phoneNumber = sock.user?.id ? jidNormalizedUser(sock.user.id).split('@')[0] : 'Unknown';
+          
+          // Verify phone number match if it was previously set
+          if (channel.phoneNumber && channel.phoneNumber !== 'Pending' && channel.phoneNumber !== phoneNumber) {
+            this.logger.error(`Connection rejected: Scanned number ${phoneNumber} does not match registered number ${channel.phoneNumber}`);
+            await sock.logout();
+            
+            await channelRef.set({
+              status: 'wrong_number',
+              updatedAt: FieldValue.serverTimestamp()
+            }, { merge: true });
+            return;
+          }
+
           await this.channelModel.findByIdAndUpdate(channelId, { 
             status: 'connected', 
-            qrCode: null,
+            qrCode: undefined,
             phoneNumber,
             lastConnectedAt: new Date()
           });
-          this.gateway.sendStatusUpdate(sessionId, 'connected');
+
+          await channelRef.set({
+            status: 'connected',
+            qrCode: '',
+            phoneNumber,
+            lastConnectedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp()
+          }, { merge: true });
         }
       });
 
@@ -143,6 +180,8 @@ export class WhatsappService implements OnModuleInit {
       phone: { $regex: phoneNumber } 
     }).exec();
 
+    const timestamp = new Date((msg.messageTimestamp as number) * 1000);
+
     const newMessage = new this.messageModel({
       channelId: new Types.ObjectId(channelId),
       leadId: lead?._id,
@@ -150,20 +189,54 @@ export class WhatsappService implements OnModuleInit {
       direction: 'inbound',
       content,
       waMessageId: msg.key.id,
-      timestamp: new Date((msg.messageTimestamp as number) * 1000),
+      timestamp,
       status: 'delivered'
     });
 
     await newMessage.save();
     
-    // Broadcast to UI via Socket.io
-    this.gateway.sendNewMessage(sessionId, {
-      id: newMessage._id,
-      leadId: lead?._id,
-      from: phoneNumber,
+    // Save to Firestore
+    const db = this.firebaseService.getFirestore();
+    const messageRef = db.collection('whatsappChannels').doc(channelId).collection('messages').doc();
+    
+    await messageRef.set({
+      externalNumber: phoneNumber,
+      leadId: lead?._id?.toString() || null,
+      direction: 'inbound',
       content,
-      timestamp: newMessage.timestamp,
+      status: 'delivered',
+      waMessageId: msg.key.id,
+      timestamp: FieldValue.serverTimestamp(),
     });
+
+    // Notify agents
+    try {
+      const channel = await this.channelModel.findById(channelId);
+      if (channel) {
+        let recipientIds: string[] = [];
+        
+        if (channel.allAgentsAccess) {
+          // Get all agents if allAgentsAccess is true
+          const allUsers = await this.usersService.findAll();
+          recipientIds = allUsers.map(u => (u as any).id || (u as any)._id.toString());
+        } else {
+          recipientIds = channel.assignedAgents.map(id => id.toString());
+        }
+        
+        // If we have specific agents, create notifications for them
+        if (recipientIds.length > 0) {
+          await this.notificationsService.createBulk(
+            recipientIds,
+            'whatsapp_message',
+            'رسالة واتساب جديدة',
+            `${lead?.name || phoneNumber}: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`,
+            { channelId, leadId: lead?._id?.toString(), phoneNumber }
+          );
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Failed to notify agents for message on channel ${channelId}: ${error.message}`);
+    }
   }
 
   async createChannel(label: string, userId: string) {
@@ -175,6 +248,18 @@ export class WhatsappService implements OnModuleInit {
       createdBy: new Types.ObjectId(userId),
     });
     await channel.save();
+
+    // Create channel in Firestore
+    const db = this.firebaseService.getFirestore();
+    await db.collection('whatsappChannels').doc(channel._id.toString()).set({
+      label,
+      sessionId,
+      phoneNumber: 'Pending',
+      status: 'disconnected',
+      assignedAgents: [],
+      allAgentsAccess: false,
+      updatedAt: FieldValue.serverTimestamp()
+    });
     
     // Start session to get QR
     await this.initSession(channel);
@@ -207,6 +292,39 @@ export class WhatsappService implements OnModuleInit {
 
     await this.channelModel.findByIdAndDelete(id);
     await this.sessionModel.deleteMany({ channelId: new Types.ObjectId(id) });
+
+    // Delete from Firestore
+    const db = this.firebaseService.getFirestore();
+    await db.collection('whatsappChannels').doc(id).delete();
+
+    return { success: true };
+  }
+
+  async reconnect(id: string) {
+    const channel = await this.channelModel.findById(id);
+    if (!channel) throw new NotFoundException('Channel not found');
+
+    // Remove old session if exists
+    const oldSock = this.sessions.get(channel.sessionId);
+    if (oldSock) {
+      try { await oldSock.logout(); } catch (e) {}
+      this.sessions.delete(channel.sessionId);
+    }
+
+    // Set to pending and re-init
+    channel.status = 'qr_pending';
+    channel.qrCode = undefined;
+    await channel.save();
+
+    // Update Firestore
+    const db = this.firebaseService.getFirestore();
+    await db.collection('whatsappChannels').doc(id).set({
+      status: 'qr_pending',
+      qrCode: '',
+      updatedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    this.initSession(channel as any);
     return { success: true };
   }
 
@@ -221,6 +339,15 @@ export class WhatsappService implements OnModuleInit {
     ).populate('assignedAgents', 'name email').exec();
     
     if (!channel) throw new NotFoundException('Channel not found');
+
+    // Update Firestore
+    const db = this.firebaseService.getFirestore();
+    await db.collection('whatsappChannels').doc(id).set({
+      assignedAgents: agents,
+      allAgentsAccess,
+      updatedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+
     return channel;
   }
 
@@ -280,6 +407,21 @@ export class WhatsappService implements OnModuleInit {
     });
 
     await newMessage.save();
+
+    // Save to Firestore
+    const db = this.firebaseService.getFirestore();
+    const messageRef = db.collection('whatsappChannels').doc(channelId).collection('messages').doc();
+    
+    await messageRef.set({
+      externalNumber: cleanPhone,
+      leadId: lead._id.toString(),
+      direction: 'outbound',
+      content,
+      status: 'sent',
+      sentByAgent: agentId,
+      waMessageId: result.key.id,
+      timestamp: FieldValue.serverTimestamp(),
+    });
 
     return newMessage;
   }

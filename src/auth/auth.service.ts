@@ -6,12 +6,14 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { LoginRequest, LoginRequestDocument } from './schemas/login-request.schema';
 import { UserStatus } from '../users/user-status.enum';
+import { FirebaseService } from '../firebase/firebase.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
+    private firebaseService: FirebaseService,
     @InjectModel(LoginRequest.name)
     private loginRequestModel: Model<LoginRequestDocument>
   ) {}
@@ -74,15 +76,24 @@ export class AuthService {
   }
 
   async login(user: any) {
-    const payload = { email: user.email, sub: user.id || user._id, role: user.role };
+    const userId = (user.id || user._id).toString();
+    const payload = { email: user.email, sub: userId, role: user.role };
     
     // Set user to online when logging in
-    await this.usersService.updateStatus(user.id || user._id, UserStatus.ONLINE);
+    await this.usersService.updateStatus(userId, UserStatus.ONLINE);
+
+    let firebaseToken: string | null = null;
+    try {
+      firebaseToken = await this.firebaseService.getAuth().createCustomToken(userId);
+    } catch (error) {
+      console.error('Failed to create Firebase custom token', error);
+    }
 
     return {
       access_token: this.jwtService.sign(payload),
+      firebaseToken,
       user: {
-        id: user.id || user._id,
+        id: userId,
         name: user.name,
         email: user.email,
         role: user.role

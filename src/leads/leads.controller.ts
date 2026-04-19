@@ -32,23 +32,6 @@ export class LeadsController {
     return this.leadsService.remove(id, req.user);
   }
 
-  @Get('reminders')
-  async getReminders(@Request() req) {
-    return this.leadsService.getPendingReminders(req.user.userId);
-  }
-
-  @Post('mark-as-read')
-  async markAsRead(@Request() req) {
-    return this.leadsService.markRemindersAsRead(req.user.userId);
-  }
-  @Get('all-reminders')
-  async getAllReminders(@Request() req, @Query('page') page: string, @Query('limit') limit: string) {
-    return this.leadsService.getAllReminders(req.user.userId, { 
-      page: page ? parseInt(page, 10) : 1, 
-      limit: limit ? parseInt(limit, 10) : 10 
-    });
-  }
-
   @Post('bulk-import')
   async bulkImport(@Body() leads: CreateLeadDto[], @Request() req) {
     return this.leadsService.bulkCreate(leads, req.user);

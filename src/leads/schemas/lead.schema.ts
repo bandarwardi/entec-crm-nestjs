@@ -42,6 +42,9 @@ export class Lead {
   @Prop({ default: false })
   reminderRead: boolean;
 
+  @Prop({ default: false })
+  reminderNotified: boolean;
+
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   createdBy: Types.ObjectId;
 

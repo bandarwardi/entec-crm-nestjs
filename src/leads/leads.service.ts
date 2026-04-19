@@ -1,17 +1,80 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { CacheService } from '../common/cache.service';
 import { Lead, LeadDocument } from './schemas/lead.schema';
 import { CreateLeadDto, UpdateLeadDto, QueryLeadsDto } from './leads.dto';
+import { CacheService } from '../common/cache.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { UsersService } from '../users/users.service';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class LeadsService {
+  private readonly logger = new Logger(LeadsService.name);
+
   constructor(
     @InjectModel(Lead.name)
     private readonly leadModel: Model<LeadDocument>,
     private readonly cacheService: CacheService,
+    private readonly usersService: UsersService,
+    private notificationsService: NotificationsService,
   ) { }
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async checkReminders() {
+    const now = new Date();
+    this.logger.debug(`Cron: Checking for reminders at ${now.toISOString()}`);
+
+    try {
+      const pendingReminders = await this.leadModel.find({
+        reminderAt: { $lte: now },
+        reminderRead: false,
+        reminderNotified: false,
+      }).exec();
+
+      if (pendingReminders.length > 0) {
+        this.logger.log(`Cron: Found ${pendingReminders.length} pending reminders to notify`);
+        
+        // Find all admins and super-admins
+        const allUsers = await this.usersService.findAll();
+        const adminIds = allUsers
+          .filter(u => u.role === 'admin' || u.role === 'super-admin')
+          .map(u => (u as any).id || (u as any)._id.toString());
+        
+        for (const lead of pendingReminders) {
+          try {
+            if (!lead.createdBy) {
+              this.logger.warn(`Lead ${lead._id} has no creator, skipping notification`);
+              continue;
+            }
+
+            const creatorId = lead.createdBy.toString();
+            
+            // Build unique recipient list (creator + admins)
+            const recipients = Array.from(new Set([creatorId, ...adminIds]));
+
+            this.logger.log(`Processing reminder for lead ${lead._id}. Total recipients: ${recipients.length}`);
+
+            await this.notificationsService.createBulk(
+              recipients,
+              'lead_reminder',
+              'تذكير بموعد عميل',
+              `${lead.name || 'عميل بدون اسم'}: ${lead.reminderNote || 'لا توجد ملاحظات'}`,
+              { leadId: lead._id.toString() }
+            );
+
+            lead.reminderNotified = true;
+            await lead.save();
+            this.logger.log(`Reminder notification sent for lead ${lead._id} to ${recipients.length} recipients`);
+          } catch (error) {
+            this.logger.error(`Failed to process reminder for lead ${lead._id}: ${error.message}`);
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Cron job failed: ${error.message}`);
+    }
+  }
 
   async findAll(query: QueryLeadsDto, user: any) {
     const page = Number(query.page) || 1;
@@ -84,7 +147,15 @@ export class LeadsService {
   }
 
   async update(id: string, dto: UpdateLeadDto) {
-    const lead = await this.leadModel.findByIdAndUpdate(id, dto, { new: true })
+    const updateData: any = { ...dto };
+    
+    // Reset notification flags if a new reminder is set or updated
+    if (dto.reminderAt) {
+      updateData.reminderNotified = false;
+      updateData.reminderRead = false;
+    }
+
+    const lead = await this.leadModel.findByIdAndUpdate(id, updateData, { new: true })
       .populate('createdBy', 'id name email role')
       .exec();
     if (!lead) throw new NotFoundException('العميل المحتمل غير موجود، تعذر التحديث');
@@ -105,60 +176,6 @@ export class LeadsService {
     if (!result) throw new NotFoundException('العميل المحتمل غير موجود، تعذر الحذف');
     await this.cacheService.invalidateByPattern('dashboard:stats:*');
     return { success: true };
-  }
-
-  async getPendingReminders(userId: string) {
-    const now = new Date();
-    const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
-
-    console.log(`Notifications: Fetching reminders for user ${userId} up to ${oneHourFromNow.toISOString()}`);
-
-    const reminders = await this.leadModel.find({
-      createdBy: new Types.ObjectId(userId),
-      reminderRead: false,
-      reminderAt: {
-        $lte: oneHourFromNow
-      },
-    }).sort({ reminderAt: 1 }).exec();
-
-    console.log(`Notifications: Found ${reminders.length} pending reminders`);
-    return reminders;
-  }
-
-  async markRemindersAsRead(userId: string) {
-    const reminders = await this.getPendingReminders(userId);
-    if (reminders.length > 0) {
-      await this.leadModel.updateMany(
-        { _id: { $in: reminders.map(r => r._id) } },
-        { reminderRead: true }
-      ).exec();
-    }
-    return { success: true };
-  }
-
-  async getAllReminders(userId: string, query: { page?: number, limit?: number }) {
-    const { page = 1, limit = 10 } = query;
-    const skip = (page - 1) * limit;
-
-    const filter = {
-      createdBy: new Types.ObjectId(userId),
-      reminderAt: { $ne: null }
-    };
-
-    const data = await this.leadModel.find(filter)
-      .sort({ reminderAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .exec();
-
-    const total = await this.leadModel.countDocuments(filter).exec();
-
-    return {
-      data,
-      total,
-      page,
-      limit,
-    };
   }
 
   async bulkCreate(leads: CreateLeadDto[], user: any) {

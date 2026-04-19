@@ -15,6 +15,8 @@ import { AiChatModule } from './ai-chat/ai-chat.module';
 import { WorkSettingsModule } from './work-settings/work-settings.module';
 import { EmailModule } from './email/email.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { FirebaseModule } from './firebase/firebase.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { BullModule } from '@nestjs/bullmq';
 
 @Module({
@@ -66,6 +68,8 @@ import { BullModule } from '@nestjs/bullmq';
     WorkSettingsModule,
     EmailModule,
     WhatsappModule,
+    FirebaseModule,
+    NotificationsModule,
     CommonModule,
     ScheduleModule.forRoot(),
     RedisModule.forRootAsync({

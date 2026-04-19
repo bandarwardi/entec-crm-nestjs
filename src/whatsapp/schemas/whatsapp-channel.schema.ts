@@ -26,10 +26,10 @@ export class WhatsappChannel {
   sessionId: string;
 
   @Prop({ default: 'disconnected' })
-  status: 'connected' | 'disconnected' | 'qr_pending' | 'banned';
+  status: 'connected' | 'disconnected' | 'qr_pending' | 'banned' | 'wrong_number';
 
-  @Prop()
-  qrCode: string;
+  @Prop({ required: false })
+  qrCode?: string;
 
   @Prop()
   lastConnectedAt: Date;

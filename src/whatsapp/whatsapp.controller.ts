@@ -32,6 +32,11 @@ export class WhatsappController {
     return this.whatsappService.deleteChannel(id);
   }
 
+  @Post('channels/:id/reconnect')
+  reconnect(@Param('id') id: string) {
+    return this.whatsappService.reconnect(id);
+  }
+
   @Patch('channels/:id/agents')
   async updateChannelAgents(
     @Param('id') id: string,

@@ -416,6 +416,7 @@ export class WhatsappService implements OnModuleInit {
     if (!result) throw new Error('Failed to send message');
     
     try {
+      this.logger.log(`[Firestore] Saving outbound message to MongoDB...`);
       const newMessage = new this.messageModel({
         channelId: channel._id,
         leadId: lead._id,
@@ -429,12 +430,13 @@ export class WhatsappService implements OnModuleInit {
       });
 
       await newMessage.save();
+      this.logger.log(`[Firestore] Saved to MongoDB. Now saving to Firestore...`);
 
       // Save to Firestore
       const db = this.firebaseService.getFirestore();
       const messageRef = db.collection('whatsappChannels').doc(channelId).collection('messages').doc();
       
-      await messageRef.set({
+      const firestoreData = {
         externalNumber: cleanPhone,
         leadId: lead._id.toString(),
         direction: 'outbound',
@@ -443,12 +445,15 @@ export class WhatsappService implements OnModuleInit {
         sentByAgent: agentId,
         waMessageId: result.key.id,
         timestamp: FieldValue.serverTimestamp(),
-      });
+      };
+
+      await messageRef.set(firestoreData);
+      this.logger.log(`[Firestore] Successfully saved message to Firestore at path: whatsappChannels/${channelId}/messages/${messageRef.id}`);
 
       return newMessage;
     } catch (dbError) {
-      // Log DB error but DO NOT throw, because message is already sent to the customer
-      this.logger.error(`Message sent to ${cleanPhone} but failed to save in DB: ${dbError.message}`);
+      this.logger.error(`[Firestore] CRITICAL ERROR: Message sent via WhatsApp but failed to save in DBs: ${dbError.message}`);
+      console.error(dbError); // Full stack trace in console
       return { success: true, waMessageId: result.key.id };
     }
   }

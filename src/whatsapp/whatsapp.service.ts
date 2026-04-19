@@ -13,7 +13,7 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import * as qrcode from 'qrcode';
-import * as pino from 'pino';
+import pino from 'pino';
 import { WhatsappChannel, WhatsappChannelDocument } from './schemas/whatsapp-channel.schema';
 import { WhatsappMessage, WhatsappMessageDocument } from './schemas/whatsapp-message.schema';
 import { WhatsappSession, WhatsappSessionDocument } from './schemas/whatsapp-session.schema';

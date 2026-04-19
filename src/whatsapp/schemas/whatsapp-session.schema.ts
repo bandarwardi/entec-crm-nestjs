@@ -5,7 +5,7 @@ export type WhatsappSessionDocument = WhatsappSession & Document;
 
 @Schema({ timestamps: true })
 export class WhatsappSession {
-  @Prop({ type: Types.ObjectId, ref: 'WhatsappChannel', required: true, unique: true })
+  @Prop({ type: Types.ObjectId, ref: 'WhatsappChannel', required: true })
   channelId: Types.ObjectId;
 
   @Prop({ required: true })
@@ -16,3 +16,7 @@ export class WhatsappSession {
 }
 
 export const WhatsappSessionSchema = SchemaFactory.createForClass(WhatsappSession);
+
+// Create compound index for faster retrieval and to ensure uniqueness of keys per channel
+WhatsappSessionSchema.index({ channelId: 1, 'data.key': 1 }, { unique: true });
+WhatsappSessionSchema.index({ sessionId: 1 });

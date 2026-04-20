@@ -9,7 +9,8 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   WAMessage,
   WASocket,
-  jidNormalizedUser
+  jidNormalizedUser,
+  Contact
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import * as qrcode from 'qrcode';
@@ -29,6 +30,7 @@ export class WhatsappService implements OnModuleInit {
   private readonly logger = new Logger(WhatsappService.name);
   private readonly pinoLogger = pino({ level: 'silent' });
   private sessions = new Map<string, WASocket>();
+  private lidMaps = new Map<string, Map<string, string>>();
 
   constructor(
     @InjectModel(WhatsappChannel.name) private channelModel: Model<WhatsappChannelDocument>,
@@ -41,6 +43,56 @@ export class WhatsappService implements OnModuleInit {
     @InjectQueue('whatsapp-messages') private messageQueue: Queue,
   ) {}
 
+  private getLidMap(sessionId: string): Map<string, string> {
+    if (!this.lidMaps.has(sessionId)) {
+      this.lidMaps.set(sessionId, new Map<string, string>());
+    }
+    return this.lidMaps.get(sessionId)!;
+  }
+
+  private async resolveToPn(sock: WASocket, sessionId: string, jid: string, msg: WAMessage): Promise<{ pn: string, source: string, unresolved: boolean }> {
+    // Layer 1: Check JID directly
+    if (jid.endsWith('@s.whatsapp.net')) {
+      return { pn: jid.split('@')[0], source: 'direct', unresolved: false };
+    }
+
+    // Layer 2: Check remoteJidAlt / participantAlt (Fastest)
+    const key = msg.key as any;
+    if (key.remoteJidAlt && key.remoteJidAlt.endsWith('@s.whatsapp.net')) {
+      const pn = key.remoteJidAlt.split('@')[0];
+      this.getLidMap(sessionId).set(jid, pn); // Cache it
+      return { pn, source: 'alt_jid', unresolved: false };
+    }
+
+    if (key.participantAlt && key.participantAlt.endsWith('@s.whatsapp.net')) {
+      const pn = key.participantAlt.split('@')[0];
+      this.getLidMap(sessionId).set(jid, pn); // Cache it
+      return { pn, source: 'alt_participant', unresolved: false };
+    }
+
+    // Layer 3: Official Baileys Store (signalRepository.lidMapping)
+    try {
+      const officialPn = await (sock as any).signalRepository.lidMapping.getPNForLID(jid);
+      if (officialPn) {
+        const pn = officialPn.split('@')[0];
+        this.getLidMap(sessionId).set(jid, pn); // Cache it
+        return { pn, source: 'official_store', unresolved: false };
+      }
+    } catch (e) {
+      this.logger.debug(`[LID] Failed to query official store for ${jid}: ${e.message}`);
+    }
+
+    // Layer 4: In-memory Map (built from events)
+    const cachedPn = this.getLidMap(sessionId).get(jid);
+    if (cachedPn) {
+      return { pn: cachedPn, source: 'memory_map', unresolved: false };
+    }
+
+    // Layer 5: Fallback to Raw JID
+    const rawPn = jid.split('@')[0].replace(/\D/g, '');
+    return { pn: rawPn, source: 'raw_fallback', unresolved: jid.endsWith('@lid') };
+  }
+
   async onModuleInit() {
     this.logger.log('Initializing WhatsApp Service...');
     const channels = await this.channelModel.find({ isActive: true }).exec();
@@ -48,6 +100,67 @@ export class WhatsappService implements OnModuleInit {
       if (channel.status === 'connected') {
         this.initSession(channel);
       }
+    }
+
+    // Start background job for LID resolution retries
+    setInterval(() => this.retryUnresolvedLids(), 5 * 60 * 1000); // Every 5 minutes
+  }
+
+  private async retryUnresolvedLids() {
+    try {
+      const unresolvedMessages = await this.messageModel.find({ unresolvedLid: true }).limit(100).exec();
+      if (unresolvedMessages.length === 0) return;
+
+      this.logger.log(`[LID Retry] Attempting to resolve ${unresolvedMessages.length} messages...`);
+
+      for (const msg of unresolvedMessages) {
+        const sock = Array.from(this.sessions.values())[0]; // Just take first active session for now, or match by channelId
+        if (!sock) continue;
+
+        const sessionId = Array.from(this.sessions.keys())[0]; // This is a bit naive if multi-session, but good enough for now
+        
+        // Better: Find the correct session for this message's channel
+        const channel = await this.channelModel.findById(msg.channelId);
+        if (!channel) continue;
+        const correctSock = this.sessions.get(channel.sessionId);
+        if (!correctSock) continue;
+
+        const { pn, source, unresolved } = await this.resolveToPn(correctSock, channel.sessionId, msg.lidJid, { key: { remoteJid: msg.lidJid } } as any);
+        
+        if (!unresolved) {
+          this.logger.log(`[LID Retry] Resolved ${msg.lidJid} -> ${pn} via ${source}`);
+          
+          // Match Lead
+          const last8 = pn.slice(-8);
+          const lead = await this.leadModel.findOne({ phone: { $regex: last8 + '$' } }).exec();
+
+          // Update MongoDB
+          msg.externalNumber = pn;
+          msg.unresolvedLid = false;
+          if (lead) {
+            msg.leadId = lead._id as any;
+          }
+          await msg.save();
+
+          // Update Firestore
+          const db = this.firebaseService.getFirestore();
+          const messagesSnapshot = await db.collection('whatsappChannels')
+            .doc(msg.channelId.toString())
+            .collection('messages')
+            .where('waMessageId', '==', msg.waMessageId)
+            .get();
+
+          for (const doc of messagesSnapshot.docs) {
+            await doc.ref.update({
+              externalNumber: pn,
+              leadId: lead?._id?.toString() || null,
+              unresolvedLid: false
+            });
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.error(`[LID Retry] Error: ${error.message}`);
     }
   }
 
@@ -79,6 +192,45 @@ export class WhatsappService implements OnModuleInit {
       });
 
       this.sessions.set(sessionId, sock);
+
+      // LID Mapping Listeners
+      sock.ev.on('lid-mapping.update', ({ lid, pn }) => {
+        const pnOnly = pn.split('@')[0];
+        this.getLidMap(sessionId).set(lid, pnOnly);
+        this.logger.debug(`[LID] Update: ${lid} -> ${pnOnly}`);
+      });
+
+      sock.ev.on('contacts.upsert', (contacts: Contact[]) => {
+        for (const c of contacts) {
+          if (c.lid && c.phoneNumber) {
+            const pn = c.phoneNumber.split('@')[0];
+            this.getLidMap(sessionId).set(c.lid, pn);
+            this.logger.debug(`[LID] Upsert: ${c.lid} -> ${pn}`);
+          }
+        }
+      });
+
+      sock.ev.on('contacts.update', (contacts: Partial<Contact>[]) => {
+        for (const c of contacts) {
+          if (c.lid && c.phoneNumber) {
+            const pn = c.phoneNumber.split('@')[0];
+            this.getLidMap(sessionId).set(c.lid, pn);
+            this.logger.debug(`[LID] Contact Update: ${c.lid} -> ${pn}`);
+          }
+        }
+      });
+
+      sock.ev.on('messaging-history.set', ({ contacts }: { contacts: Contact[] }) => {
+        if (contacts) {
+          for (const c of contacts) {
+            if (c.lid && c.phoneNumber) {
+              const pn = c.phoneNumber.split('@')[0];
+              this.getLidMap(sessionId).set(c.lid, pn);
+              this.logger.debug(`[LID] History Sync: ${c.lid} -> ${pn}`);
+            }
+          }
+        }
+      });
 
       sock.ev.on('creds.update', saveCreds);
 
@@ -170,29 +322,25 @@ export class WhatsappService implements OnModuleInit {
 
   private async handleIncomingMessage(channelId: string, sessionId: string, msg: WAMessage) {
     try {
+      const sock = this.sessions.get(sessionId);
+      if (!sock) {
+        this.logger.error(`[Incoming] Sock not found for session ${sessionId}`);
+        return;
+      }
+
       const fromJid = msg.key.remoteJid;
       if (!fromJid) return;
 
-      // Root Cause Fix: Extract real phone number from JID more reliably
-      // remoteJid can be "249xxxxxxx@s.whatsapp.net" or "status@broadcast" or group JIDs
-      let rawPhoneNumber = fromJid.split('@')[0];
-      
-      // If it's a group message, get the actual participant who sent it
-      if (fromJid.endsWith('@g.us') && msg.participant) {
-        rawPhoneNumber = msg.participant.split('@')[0];
-      }
-
-      const phoneNumber = rawPhoneNumber.replace(/\D/g, '');
-      
       // Check if this is a message from the system to itself (Message Yourself)
-      const isSelf = msg.key.fromMe;
-      
-      if (isSelf) {
+      if (msg.key.fromMe) {
         this.logger.debug(`[Incoming] Skipping message because it's fromMe (Outbound sync)`);
         return;
       }
 
-      this.logger.log(`[Incoming] Processing message from ${phoneNumber} on channel ${channelId}`);
+      // Step 1: Resolve the real phone number
+      const { pn: phoneNumber, source, unresolved } = await this.resolveToPn(sock, sessionId, fromJid, msg);
+      
+      this.logger.log(`[LID Resolve] source=${source}, lid=${fromJid}, pn=${phoneNumber}, unresolved=${unresolved}`);
 
       const content = msg.message?.conversation || 
                       msg.message?.extendedTextMessage?.text || 
@@ -200,9 +348,9 @@ export class WhatsappService implements OnModuleInit {
                       msg.message?.videoMessage?.caption ||
                       '[Non-text message]';
 
-      // Advanced Lead Matching: Match by the last 8 digits to be globally compatible
+      // Advanced Lead Matching: Match by the last 8 digits
       let lead: any = null;
-      if (phoneNumber.length >= 8) {
+      if (!unresolved && phoneNumber.length >= 8) {
         const last8 = phoneNumber.slice(-8);
         lead = await this.leadModel.findOne({ 
           phone: { $regex: last8 + '$' } 
@@ -211,8 +359,10 @@ export class WhatsappService implements OnModuleInit {
 
       if (lead) {
         this.logger.log(`[Incoming] Found matching lead: ${lead.name} (${lead._id})`);
+      } else if (unresolved) {
+        this.logger.warn(`[Incoming] Message from unresolved LID ${fromJid}. Will retry later.`);
       } else {
-        this.logger.warn(`[Incoming] No lead found for phone ${phoneNumber}. Message will be saved without leadId.`);
+        this.logger.warn(`[Incoming] No lead found for phone ${phoneNumber}.`);
       }
 
       const timestamp = new Date((msg.messageTimestamp as number) * 1000);
@@ -225,7 +375,9 @@ export class WhatsappService implements OnModuleInit {
         content,
         waMessageId: msg.key.id,
         timestamp,
-        status: 'delivered'
+        status: 'delivered',
+        unresolvedLid: unresolved,
+        lidJid: fromJid.endsWith('@lid') ? fromJid : undefined
       });
 
       await newMessage.save();
@@ -242,6 +394,8 @@ export class WhatsappService implements OnModuleInit {
         status: 'delivered',
         waMessageId: msg.key.id,
         timestamp: FieldValue.serverTimestamp(),
+        unresolvedLid: unresolved,
+        lidJid: fromJid.endsWith('@lid') ? fromJid : null
       });
 
       this.logger.log(`[Incoming] Message saved to Firestore: whatsappChannels/${channelId}/messages/${messageRef.id}`);

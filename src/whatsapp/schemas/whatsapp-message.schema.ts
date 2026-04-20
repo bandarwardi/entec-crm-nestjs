@@ -34,6 +34,12 @@ export class WhatsappMessage {
 
   @Prop({ required: true })
   timestamp: Date;
+
+  @Prop({ default: false })
+  unresolvedLid: boolean;
+
+  @Prop()
+  lidJid: string;
 }
 
 export const WhatsappMessageSchema = SchemaFactory.createForClass(WhatsappMessage);

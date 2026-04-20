@@ -10,11 +10,15 @@ import makeWASocket, {
   WAMessage,
   WASocket,
   jidNormalizedUser,
-  Contact
+  Contact,
+  downloadMediaMessage
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import * as qrcode from 'qrcode';
 import pino from 'pino';
+import fetch from 'node-fetch';
+import FormData from 'form-data';
+import { ConfigService } from '@nestjs/config';
 import { WhatsappChannel, WhatsappChannelDocument } from './schemas/whatsapp-channel.schema';
 import { WhatsappMessage, WhatsappMessageDocument } from './schemas/whatsapp-message.schema';
 import { WhatsappSession, WhatsappSessionDocument } from './schemas/whatsapp-session.schema';
@@ -40,8 +44,41 @@ export class WhatsappService implements OnModuleInit {
     private readonly usersService: UsersService,
     private readonly firebaseService: FirebaseService,
     private readonly notificationsService: NotificationsService,
+    private readonly configService: ConfigService,
     @InjectQueue('whatsapp-messages') private messageQueue: Queue,
   ) {}
+
+  private async uploadMedia(buffer: Buffer, filename: string): Promise<string | null> {
+    try {
+      const uploadUrl = this.configService.get<string>('UPLOAD_API_URL');
+      if (!uploadUrl) {
+        this.logger.error('UPLOAD_API_URL not found in environment variables');
+        return null;
+      }
+
+      const form = new (FormData as any)();
+      form.append('file', buffer, { 
+        filename,
+        contentType: filename.endsWith('.webp') ? 'image/webp' : (filename.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg')
+      });
+
+      const response = await fetch(uploadUrl, {
+        method: 'POST',
+        body: form as any,
+      });
+
+      const result: any = await response.json();
+      if (result && (result.url || result.file_url)) {
+        return result.url || result.file_url;
+      }
+
+      this.logger.error(`Upload failed: ${JSON.stringify(result)}`);
+      return null;
+    } catch (error) {
+      this.logger.error(`Error uploading media: ${error.message}`);
+      return null;
+    }
+  }
 
   private getLidMap(sessionId: string): Map<string, string> {
     if (!this.lidMaps.has(sessionId)) {
@@ -232,7 +269,63 @@ export class WhatsappService implements OnModuleInit {
         }
       });
 
+      sock.ev.on('presence.update', async (update) => {
+        const { id, presences } = update;
+        // In Baileys v7, presences is a map of participant JID to PresenceData
+        // For individual chats, we check the main JID's presence
+        const presence = Object.values(presences || {})[0]?.lastKnownPresence;
+        
+        // presence can be 'unavailable', 'available', 'composing', 'recording', 'paused'
+        const isOnline = presence === 'available' || presence === 'composing' || presence === 'recording';
+        const phoneNumber = id.split('@')[0];
+        const last8 = phoneNumber.slice(-8);
+
+        this.logger.debug(`[Presence] ${id} is now ${presence}`);
+
+        // Update Lead status
+        await this.leadModel.findOneAndUpdate(
+          { phone: { $regex: last8 + '$' } },
+          { isOnline }
+        );
+      });
+
       sock.ev.on('creds.update', saveCreds);
+
+      sock.ev.on('messages.update', async (updates) => {
+        for (const update of updates) {
+          const { key, update: msgUpdate } = update;
+          if (msgUpdate.status) {
+            // Status codes: 2=Sent, 3=Delivered, 4=Read
+            let statusStr = 'sent';
+            if (msgUpdate.status === 3) statusStr = 'delivered';
+            if (msgUpdate.status === 4) statusStr = 'read';
+
+            this.logger.debug(`[Message Update] ID: ${key.id}, Status: ${statusStr}`);
+
+            // Update MongoDB
+            await this.messageModel.findOneAndUpdate(
+              { waMessageId: key.id },
+              { status: statusStr }
+            );
+
+            // Update Firestore
+            try {
+              const db = this.firebaseService.getFirestore();
+              const messagesSnapshot = await db.collection('whatsappChannels')
+                .doc(channelId)
+                .collection('messages')
+                .where('waMessageId', '==', key.id)
+                .get();
+
+              for (const doc of messagesSnapshot.docs) {
+                await doc.ref.update({ status: statusStr });
+              }
+            } catch (fsError) {
+              this.logger.error(`[Message Update] Firestore update failed: ${fsError.message}`);
+            }
+          }
+        }
+      });
 
       sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
@@ -329,24 +422,59 @@ export class WhatsappService implements OnModuleInit {
       }
 
       const fromJid = msg.key.remoteJid;
-      if (!fromJid) return;
+      if (!fromJid || fromJid === 'status@broadcast') return;
 
-      // Check if this is a message from the system to itself (Message Yourself)
-      if (msg.key.fromMe) {
-        this.logger.debug(`[Incoming] Skipping message because it's fromMe (Outbound sync)`);
+      // Check if message already exists (to prevent duplicates from system's own sends)
+      const existingMsg = await this.messageModel.findOne({ waMessageId: msg.key.id }).exec();
+      if (existingMsg) {
+        this.logger.debug(`[Incoming] Message ${msg.key.id} already exists, skipping.`);
         return;
       }
 
       // Step 1: Resolve the real phone number
       const { pn: phoneNumber, source, unresolved } = await this.resolveToPn(sock, sessionId, fromJid, msg);
       
-      this.logger.log(`[LID Resolve] source=${source}, lid=${fromJid}, pn=${phoneNumber}, unresolved=${unresolved}`);
+      const direction = msg.key.fromMe ? 'outbound' : 'inbound';
+      this.logger.log(`[Incoming Sync] direction=${direction}, source=${source}, lid=${fromJid}, pn=${phoneNumber}`);
 
       const content = msg.message?.conversation || 
                       msg.message?.extendedTextMessage?.text || 
                       msg.message?.imageMessage?.caption ||
                       msg.message?.videoMessage?.caption ||
+                      (msg.message?.stickerMessage ? '[Sticker]' : null) ||
+                      (msg.message?.audioMessage ? '[Voice Note]' : null) ||
                       '[Non-text message]';
+
+      const messageType = msg.message?.stickerMessage ? 'sticker' : 
+                         (msg.message?.imageMessage ? 'image' : 
+                         (msg.message?.videoMessage ? 'video' : 
+                         (msg.message?.audioMessage ? 'audio' : 'text')));
+
+      let mediaUrl: string | null = null;
+      if (messageType !== 'text') {
+        try {
+          const buffer = await downloadMediaMessage(msg, 'buffer', {}, { 
+            logger: this.pinoLogger as any,
+            re_use_local_cache: true 
+          } as any) as Buffer;
+          
+          if (buffer) {
+            let ext = 'bin';
+            if (messageType === 'sticker') ext = 'webp';
+            else if (messageType === 'image') ext = 'jpg';
+            else if (messageType === 'video') ext = 'mp4';
+            else if (messageType === 'audio') ext = 'ogg';
+
+            const filename = `wa_${msg.key.id}.${ext}`;
+            mediaUrl = await this.uploadMedia(buffer, filename);
+            if (mediaUrl) {
+              this.logger.log(`[Media] Uploaded ${messageType}: ${mediaUrl}`);
+            }
+          }
+        } catch (downloadError) {
+          this.logger.error(`[Media] Download failed: ${downloadError.message}`);
+        }
+      }
 
       // Advanced Lead Matching: Match by the last 8 digits
       let lead: any = null;
@@ -359,6 +487,19 @@ export class WhatsappService implements OnModuleInit {
 
       if (lead) {
         this.logger.log(`[Incoming] Found matching lead: ${lead.name} (${lead._id})`);
+        
+        // Background update for Profile Picture and Last Message
+        const updateData: any = { lastMessageAt: new Date() };
+        
+        // Only fetch profile pic if not already set or every once in a while
+        if (!lead.profilePicUrl) {
+          try {
+            const ppUrl = await sock.profilePictureUrl(fromJid, 'image').catch(() => null);
+            if (ppUrl) updateData.profilePicUrl = ppUrl;
+          } catch (e) {}
+        }
+
+        await this.leadModel.findByIdAndUpdate(lead._id, updateData);
       } else if (unresolved) {
         this.logger.warn(`[Incoming] Message from unresolved LID ${fromJid}. Will retry later.`);
       } else {
@@ -371,8 +512,9 @@ export class WhatsappService implements OnModuleInit {
         channelId: new Types.ObjectId(channelId),
         leadId: lead?._id,
         externalNumber: phoneNumber,
-        direction: 'inbound',
+        direction,
         content,
+        messageType,
         waMessageId: msg.key.id,
         timestamp,
         status: 'delivered',
@@ -389,8 +531,10 @@ export class WhatsappService implements OnModuleInit {
       await messageRef.set({
         externalNumber: phoneNumber,
         leadId: lead?._id?.toString() || null,
-        direction: 'inbound',
+        direction,
         content,
+        messageType,
+        mediaUrl,
         status: 'delivered',
         waMessageId: msg.key.id,
         timestamp: FieldValue.serverTimestamp(),
@@ -546,7 +690,7 @@ export class WhatsappService implements OnModuleInit {
     return channel;
   }
 
-  async sendMessage(channelId: string, leadId: string, content: string, agentId: string) {
+  async sendMessage(channelId: string, leadId: string, content: string, agentId: string, messageType: string = 'text', mediaUrl?: string) {
     const channel = await this.channelModel.findById(channelId);
     if (!channel) throw new NotFoundException('Channel not found');
 
@@ -560,7 +704,9 @@ export class WhatsappService implements OnModuleInit {
       channelId,
       leadId,
       content,
-      agentId
+      agentId,
+      messageType,
+      mediaUrl
     }, {
       jobId, // Use specific jobId to help prevent duplicates
       attempts: 1, // Only try once to avoid banning
@@ -571,8 +717,8 @@ export class WhatsappService implements OnModuleInit {
     return { jobId: job.id, status: 'queued' };
   }
 
-  async sendDirectMessage(channelId: string, leadId: string, content: string, agentId: string) {
-    this.logger.log(`sendDirectMessage: Attempting to send message to lead ${leadId} via channel ${channelId}`);
+  async sendDirectMessage(channelId: string, leadId: string, content: string, agentId: string, messageType: string = 'text', mediaUrl?: string) {
+    this.logger.log(`sendDirectMessage: Attempting to send ${messageType} to lead ${leadId} via channel ${channelId}`);
     
     const channel = await this.channelModel.findById(channelId);
     if (!channel) {
@@ -604,9 +750,22 @@ export class WhatsappService implements OnModuleInit {
     const cleanPhone = lead.phone.replace(/\D/g, '');
     const jid = `${cleanPhone}@s.whatsapp.net`;
 
-    const result = await sock.sendMessage(jid, { text: content });
+    let result: any;
+    if (messageType === 'sticker' && mediaUrl) {
+      result = await sock.sendMessage(jid, { sticker: { url: mediaUrl } });
+    } else if (messageType === 'audio' && mediaUrl) {
+      result = await sock.sendMessage(jid, { audio: { url: mediaUrl }, ptt: true });
+    } else if (messageType === 'image' && mediaUrl) {
+      result = await sock.sendMessage(jid, { image: { url: mediaUrl }, caption: content });
+    } else {
+      result = await sock.sendMessage(jid, { text: content });
+    }
+
     if (!result) throw new Error('Failed to send message');
     
+    // Update lastMessageAt for sorting
+    await this.leadModel.findByIdAndUpdate(lead._id, { lastMessageAt: new Date() });
+
     try {
       this.logger.log(`[Firestore] Saving outbound message to MongoDB...`);
       const newMessage = new this.messageModel({
@@ -615,6 +774,8 @@ export class WhatsappService implements OnModuleInit {
         externalNumber: cleanPhone,
         direction: 'outbound',
         content,
+        messageType,
+        mediaUrl,
         waMessageId: result.key.id,
         timestamp: new Date(),
         status: 'sent',
@@ -633,6 +794,8 @@ export class WhatsappService implements OnModuleInit {
         leadId: lead._id.toString(),
         direction: 'outbound',
         content,
+        messageType,
+        mediaUrl,
         status: 'sent',
         sentByAgent: agentId,
         waMessageId: result.key.id,

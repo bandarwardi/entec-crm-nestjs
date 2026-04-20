@@ -36,6 +36,15 @@ export class Lead {
   @Prop({ type: Date })
   reminderAt: Date;
 
+  @Prop({ type: Date })
+  lastMessageAt: Date;
+
+  @Prop()
+  profilePicUrl: string;
+
+  @Prop({ default: false })
+  isOnline: boolean;
+
   @Prop()
   reminderNote: string;
 

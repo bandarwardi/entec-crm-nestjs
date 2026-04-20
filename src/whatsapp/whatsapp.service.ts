@@ -429,7 +429,7 @@ export class WhatsappService implements OnModuleInit {
       }
 
       const fromJid = msg.key.remoteJid;
-      if (!fromJid || fromJid === 'status@broadcast') return;
+      if (!fromJid || fromJid === 'status@broadcast' || fromJid.endsWith('@g.us')) return;
 
       // Check if message already exists (to prevent duplicates from system's own sends)
       const existingMsg = await this.messageModel.findOne({ waMessageId: msg.key.id }).exec();

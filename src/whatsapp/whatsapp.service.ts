@@ -169,76 +169,89 @@ export class WhatsappService implements OnModuleInit {
   }
 
   private async handleIncomingMessage(channelId: string, sessionId: string, msg: WAMessage) {
-    const fromJid = msg.key.remoteJid;
-    if (!fromJid) return;
-
-    const phoneNumber = fromJid.split('@')[0].replace(/\D/g, '');
-    
-    const content = msg.message?.conversation || 
-                    msg.message?.extendedTextMessage?.text || 
-                    '[Non-text message]';
-
-    // Try to find a matching lead by phone number
-    const lead = await this.leadModel.findOne({ 
-      phone: { $regex: phoneNumber } 
-    }).exec();
-
-    const timestamp = new Date((msg.messageTimestamp as number) * 1000);
-
-    const newMessage = new this.messageModel({
-      channelId: new Types.ObjectId(channelId),
-      leadId: lead?._id,
-      externalNumber: phoneNumber,
-      direction: 'inbound',
-      content,
-      waMessageId: msg.key.id,
-      timestamp,
-      status: 'delivered'
-    });
-
-    await newMessage.save();
-    
-    // Save to Firestore
-    const db = this.firebaseService.getFirestore();
-    const messageRef = db.collection('whatsappChannels').doc(channelId).collection('messages').doc();
-    
-    await messageRef.set({
-      externalNumber: phoneNumber,
-      leadId: lead?._id?.toString() || null,
-      direction: 'inbound',
-      content,
-      status: 'delivered',
-      waMessageId: msg.key.id,
-      timestamp: FieldValue.serverTimestamp(),
-    });
-
-    // Notify agents
     try {
-      const channel = await this.channelModel.findById(channelId);
-      if (channel) {
-        let recipientIds: string[] = [];
-        
-        if (channel.allAgentsAccess) {
-          // Get all agents if allAgentsAccess is true
-          const allUsers = await this.usersService.findAll();
-          recipientIds = allUsers.map(u => (u as any).id || (u as any)._id.toString());
-        } else {
-          recipientIds = channel.assignedAgents.map(id => id.toString());
+      const fromJid = msg.key.remoteJid;
+      if (!fromJid) return;
+
+      const phoneNumber = fromJid.split('@')[0].replace(/\D/g, '');
+      this.logger.log(`[Incoming] New message from ${phoneNumber} on channel ${channelId}`);
+      
+      const content = msg.message?.conversation || 
+                      msg.message?.extendedTextMessage?.text || 
+                      '[Non-text message]';
+
+      // Try to find a matching lead by phone number
+      // Match by the end of the number to handle different formats (with/without country code)
+      const lead = await this.leadModel.findOne({ 
+        phone: { $regex: phoneNumber.substring(phoneNumber.length - 9) } 
+      }).exec();
+
+      if (lead) {
+        this.logger.log(`[Incoming] Found matching lead: ${lead.name} (${lead._id})`);
+      }
+
+      const timestamp = new Date((msg.messageTimestamp as number) * 1000);
+
+      const newMessage = new this.messageModel({
+        channelId: new Types.ObjectId(channelId),
+        leadId: lead?._id,
+        externalNumber: phoneNumber,
+        direction: 'inbound',
+        content,
+        waMessageId: msg.key.id,
+        timestamp,
+        status: 'delivered'
+      });
+
+      await newMessage.save();
+      
+      // Save to Firestore
+      const db = this.firebaseService.getFirestore();
+      const messageRef = db.collection('whatsappChannels').doc(channelId).collection('messages').doc();
+      
+      await messageRef.set({
+        externalNumber: phoneNumber,
+        leadId: lead?._id?.toString() || null,
+        direction: 'inbound',
+        content,
+        status: 'delivered',
+        waMessageId: msg.key.id,
+        timestamp: FieldValue.serverTimestamp(),
+      });
+
+      this.logger.log(`[Incoming] Message saved to Firestore: whatsappChannels/${channelId}/messages/${messageRef.id}`);
+
+      // Notify agents
+      try {
+        const channel = await this.channelModel.findById(channelId);
+        if (channel) {
+          let recipientIds: string[] = [];
+          
+          if (channel.allAgentsAccess) {
+            // Get all agents if allAgentsAccess is true
+            const allUsers = await this.usersService.findAll();
+            recipientIds = allUsers.map(u => (u as any).id || (u as any)._id.toString());
+          } else {
+            recipientIds = channel.assignedAgents.map(id => id.toString());
+          }
+          
+          // If we have specific agents, create notifications for them
+          if (recipientIds.length > 0) {
+            await this.notificationsService.createBulk(
+              recipientIds,
+              'whatsapp_message',
+              'رسالة واتساب جديدة',
+              `${lead?.name || phoneNumber}: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`,
+              { channelId, leadId: lead?._id?.toString(), phoneNumber }
+            );
+          }
         }
-        
-        // If we have specific agents, create notifications for them
-        if (recipientIds.length > 0) {
-          await this.notificationsService.createBulk(
-            recipientIds,
-            'whatsapp_message',
-            'رسالة واتساب جديدة',
-            `${lead?.name || phoneNumber}: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`,
-            { channelId, leadId: lead?._id?.toString(), phoneNumber }
-          );
-        }
+      } catch (error) {
+        this.logger.error(`[Incoming] Failed to notify agents: ${error.message}`);
       }
     } catch (error) {
-      this.logger.error(`Failed to notify agents for message on channel ${channelId}: ${error.message}`);
+      this.logger.error(`[Incoming] CRITICAL ERROR handling incoming message: ${error.message}`);
+      console.error(error);
     }
   }
 

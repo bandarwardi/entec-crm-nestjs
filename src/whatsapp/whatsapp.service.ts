@@ -24,6 +24,7 @@ import { WhatsappMessage, WhatsappMessageDocument } from './schemas/whatsapp-mes
 import { WhatsappSession, WhatsappSessionDocument } from './schemas/whatsapp-session.schema';
 import { useMongoDBAuthState } from './mongodb-auth';
 import { Lead, LeadDocument } from '../leads/schemas/lead.schema';
+import { LeadStatus } from '../leads/lead-status.enum';
 import { UsersService } from '../users/users.service';
 import { FirebaseService } from '../firebase/firebase.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -512,10 +513,33 @@ export class WhatsappService implements OnModuleInit {
         }
 
         await this.leadModel.findByIdAndUpdate(lead._id, updateData);
+      } else if (!unresolved && phoneNumber) {
+        // Auto-create lead for new incoming contacts
+        try {
+          this.logger.log(`[Incoming] No lead found for phone ${phoneNumber}. Auto-creating...`);
+          const channel = await this.channelModel.findById(channelId);
+          
+          lead = new this.leadModel({
+            name: msg.pushName || phoneNumber, 
+            phone: phoneNumber,
+            status: LeadStatus.NEW,
+            lastMessageAt: new Date(),
+            createdBy: channel?.createdBy || undefined
+          });
+          
+          // Try to get profile pic
+          try {
+            const ppUrl = await sock.profilePictureUrl(fromJid, 'image').catch(() => null);
+            if (ppUrl) lead.profilePicUrl = ppUrl;
+          } catch (e) {}
+
+          await lead.save();
+          this.logger.log(`[Incoming] Auto-created lead for ${phoneNumber}: ${lead.name}`);
+        } catch (err) {
+          this.logger.error(`[Incoming] Failed to auto-create lead: ${err.message}`);
+        }
       } else if (unresolved) {
         this.logger.warn(`[Incoming] Message from unresolved LID ${fromJid}. Will retry later.`);
-      } else {
-        this.logger.warn(`[Incoming] No lead found for phone ${phoneNumber}.`);
       }
 
       const timestamp = new Date((msg.messageTimestamp as number) * 1000);

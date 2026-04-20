@@ -19,14 +19,14 @@ export class DashboardService {
     private workSettingsService: WorkSettingsService,
   ) {}
 
-  async getTodayAdminStats() {
+  async getTodayAdminStats(date?: string) {
     const settings = await this.workSettingsService.getSettings();
     const timezone = settings.timezone || 'Africa/Cairo';
-    const now = DateTime.now().setZone(timezone);
-    const startOfDay = now.startOf('day');
-    const endOfDay = now.endOf('day');
+    const targetDate = date ? DateTime.fromISO(date).setZone(timezone) : DateTime.now().setZone(timezone);
+    const startOfDay = targetDate.startOf('day');
+    const endOfDay = targetDate.endOf('day');
 
-    // 1. Get total leads today
+    // 1. Get total leads for the period
     const todayLeadsCount = await this.leadModel.countDocuments({
       createdAt: { $gte: startOfDay.toJSDate(), $lte: endOfDay.toJSDate() }
     });
@@ -34,13 +34,21 @@ export class DashboardService {
     // 2. Get all agents
     const agents = await this.userModel.find({ role: 'agent' }).select('id name currentStatus').exec();
 
-    // 3. Calculate performance for each agent today
+    // 3. Calculate performance for each agent for the period
     const employeePerformance = await Promise.all(agents.map(async (agent) => {
       const perf = await this.calculateDailyPerformance(agent._id.toString(), startOfDay, settings);
+      
+      // Get leads added by this agent on this specific day
+      const leadsCount = await this.leadModel.countDocuments({
+        creator: agent._id,
+        createdAt: { $gte: startOfDay.toJSDate(), $lte: endOfDay.toJSDate() }
+      });
+
       return {
         id: agent._id,
         name: agent.name,
         status: agent.currentStatus,
+        leadsCount,
         ...perf
       };
     }));

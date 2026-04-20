@@ -26,7 +26,7 @@ export class WhatsappMessage {
   @Prop({ unique: true })
   waMessageId: string;
 
-  @Prop({ default: 'sent', enum: ['sent', 'delivered', 'read', 'failed'] })
+  @Prop({ default: 'sent', enum: ['pending', 'sent', 'delivered', 'read', 'failed'] })
   status: string;
 
   @Prop({ type: Types.ObjectId, ref: 'User' })

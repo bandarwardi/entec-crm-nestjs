@@ -173,32 +173,46 @@ export class WhatsappService implements OnModuleInit {
       const fromJid = msg.key.remoteJid;
       if (!fromJid) return;
 
-      // Ensure we get the actual sender number
-      // In private chats, remoteJid is the other person's number
-      const phoneNumber = fromJid.split('@')[0].replace(/\D/g, '');
+      // Root Cause Fix: Extract real phone number from JID more reliably
+      // remoteJid can be "249xxxxxxx@s.whatsapp.net" or "status@broadcast" or group JIDs
+      let rawPhoneNumber = fromJid.split('@')[0];
+      
+      // If it's a group message, get the actual participant who sent it
+      if (fromJid.endsWith('@g.us') && msg.participant) {
+        rawPhoneNumber = msg.participant.split('@')[0];
+      }
+
+      const phoneNumber = rawPhoneNumber.replace(/\D/g, '');
       
       // Check if this is a message from the system to itself (Message Yourself)
-      const isSelf = msg.key.fromMe || (msg.participant && msg.participant.includes(phoneNumber));
+      const isSelf = msg.key.fromMe;
       
-      this.logger.log(`[Incoming] New message from ${phoneNumber} on channel ${channelId}. IsSelf: ${isSelf}`);
-      
-      if (msg.key.fromMe) {
-        this.logger.debug(`[Incoming] Skipping message because it's marked as fromMe (Outbound from another device)`);
+      if (isSelf) {
+        this.logger.debug(`[Incoming] Skipping message because it's fromMe (Outbound sync)`);
         return;
       }
 
+      this.logger.log(`[Incoming] Processing message from ${phoneNumber} on channel ${channelId}`);
+
       const content = msg.message?.conversation || 
                       msg.message?.extendedTextMessage?.text || 
+                      msg.message?.imageMessage?.caption ||
+                      msg.message?.videoMessage?.caption ||
                       '[Non-text message]';
 
-      // Try to find a matching lead by phone number
-      // Match by the end of the number to handle different formats (with/without country code)
-      const lead = await this.leadModel.findOne({ 
-        phone: { $regex: phoneNumber.substring(phoneNumber.length - 9) } 
-      }).exec();
+      // Advanced Lead Matching: Match by the last 8 digits to be globally compatible
+      let lead: any = null;
+      if (phoneNumber.length >= 8) {
+        const last8 = phoneNumber.slice(-8);
+        lead = await this.leadModel.findOne({ 
+          phone: { $regex: last8 + '$' } 
+        }).exec();
+      }
 
       if (lead) {
         this.logger.log(`[Incoming] Found matching lead: ${lead.name} (${lead._id})`);
+      } else {
+        this.logger.warn(`[Incoming] No lead found for phone ${phoneNumber}. Message will be saved without leadId.`);
       }
 
       const timestamp = new Date((msg.messageTimestamp as number) * 1000);

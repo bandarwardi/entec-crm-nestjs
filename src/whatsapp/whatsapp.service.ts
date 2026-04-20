@@ -448,14 +448,18 @@ export class WhatsappService implements OnModuleInit {
                       msg.message?.extendedTextMessage?.text || 
                       msg.message?.imageMessage?.caption ||
                       msg.message?.videoMessage?.caption ||
+                      msg.message?.documentMessage?.caption ||
+                      msg.message?.documentMessage?.fileName ||
                       (msg.message?.stickerMessage ? '[Sticker]' : null) ||
                       (msg.message?.audioMessage ? '[Voice Note]' : null) ||
+                      (msg.message?.documentMessage ? '[Document]' : null) ||
                       '[Non-text message]';
 
       const messageType = msg.message?.stickerMessage ? 'sticker' : 
                          (msg.message?.imageMessage ? 'image' : 
                          (msg.message?.videoMessage ? 'video' : 
-                         (msg.message?.audioMessage ? 'audio' : 'text')));
+                         (msg.message?.audioMessage ? 'audio' : 
+                         (msg.message?.documentMessage ? 'document' : 'text'))));
 
       let mediaUrl: string | null = null;
       if (messageType !== 'text') {
@@ -473,6 +477,11 @@ export class WhatsappService implements OnModuleInit {
             else if (messageType === 'image') ext = 'jpg';
             else if (messageType === 'video') ext = 'mp4';
             else if (messageType === 'audio') ext = 'ogg';
+            else if (messageType === 'document') {
+              const docMsg = msg.message?.documentMessage;
+              const fileName = docMsg?.fileName || 'document';
+              ext = fileName.split('.').pop() || 'pdf';
+            }
 
             const filename = `wa_${msg.key.id}.${ext}`;
             mediaUrl = await this.uploadMedia(buffer, filename);
@@ -852,6 +861,13 @@ export class WhatsappService implements OnModuleInit {
           audio: { url: mediaUrl }, 
           mimetype: 'audio/mpeg', // Use standard audio mimetype
           ptt: false 
+        });
+      } else if (messageType === 'document' && mediaUrl) {
+        const fileName = content || 'Document';
+        return await sock.sendMessage(jid, { 
+          document: { url: mediaUrl }, 
+          fileName: fileName.includes('.') ? fileName : `${fileName}.pdf`,
+          mimetype: 'application/pdf' // Default to PDF if not specified, WA will handle others
         });
       } else if (messageType === 'image' && mediaUrl) {
         return await sock.sendMessage(jid, { image: { url: mediaUrl }, caption: content });

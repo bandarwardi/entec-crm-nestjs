@@ -187,6 +187,10 @@ export class WhatsappService implements OnModuleInit {
         return;
       }
 
+      const content = msg.message?.conversation || 
+                      msg.message?.extendedTextMessage?.text || 
+                      '[Non-text message]';
+
       // Try to find a matching lead by phone number
       // Match by the end of the number to handle different formats (with/without country code)
       const lead = await this.leadModel.findOne({ 

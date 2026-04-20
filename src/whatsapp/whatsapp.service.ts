@@ -826,8 +826,8 @@ export class WhatsappService implements OnModuleInit {
       } else if (messageType === 'audio' && mediaUrl) {
         return await sock.sendMessage(jid, { 
           audio: { url: mediaUrl }, 
-          mimetype: 'audio/ogg; codecs=opus',
-          ptt: true 
+          mimetype: 'audio/mpeg', // Use standard audio mimetype
+          ptt: false 
         });
       } else if (messageType === 'image' && mediaUrl) {
         return await sock.sendMessage(jid, { image: { url: mediaUrl }, caption: content });

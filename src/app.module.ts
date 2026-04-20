@@ -18,6 +18,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { BullModule } from '@nestjs/bullmq';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { BullModule } from '@nestjs/bullmq';
     WhatsappModule,
     FirebaseModule,
     NotificationsModule,
+    DashboardModule,
     CommonModule,
     ScheduleModule.forRoot(),
     RedisModule.forRootAsync({

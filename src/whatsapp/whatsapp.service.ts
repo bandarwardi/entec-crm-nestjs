@@ -57,9 +57,14 @@ export class WhatsappService implements OnModuleInit {
       }
 
       const form = new (FormData as any)();
+      let contentType = 'image/jpeg';
+      if (filename.endsWith('.webp')) contentType = 'image/webp';
+      else if (filename.endsWith('.mp4')) contentType = 'video/mp4';
+      else if (filename.endsWith('.mp3')) contentType = 'audio/mpeg';
+
       form.append('file', buffer, { 
         filename,
-        contentType: filename.endsWith('.webp') ? 'image/webp' : (filename.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg')
+        contentType
       });
 
       const response = await fetch(uploadUrl, {
@@ -452,6 +457,7 @@ export class WhatsappService implements OnModuleInit {
 
       let mediaUrl: string | null = null;
       if (messageType !== 'text') {
+        this.logger.log(`[Media] Detected ${messageType}, attempting download...`);
         try {
           const buffer = await downloadMediaMessage(msg, 'buffer', {}, { 
             logger: this.pinoLogger as any,
@@ -459,20 +465,25 @@ export class WhatsappService implements OnModuleInit {
           } as any) as Buffer;
           
           if (buffer) {
+            this.logger.log(`[Media] Downloaded ${messageType} (${buffer.length} bytes)`);
             let ext = 'bin';
             if (messageType === 'sticker') ext = 'webp';
             else if (messageType === 'image') ext = 'jpg';
             else if (messageType === 'video') ext = 'mp4';
-            else if (messageType === 'audio') ext = 'ogg';
+            else if (messageType === 'audio') ext = 'mp3';
 
             const filename = `wa_${msg.key.id}.${ext}`;
             mediaUrl = await this.uploadMedia(buffer, filename);
             if (mediaUrl) {
-              this.logger.log(`[Media] Uploaded ${messageType}: ${mediaUrl}`);
+              this.logger.log(`[Media] Uploaded ${messageType} successfully: ${mediaUrl}`);
+            } else {
+              this.logger.error(`[Media] Upload failed for ${messageType}`);
             }
+          } else {
+            this.logger.warn(`[Media] Download returned empty buffer for ${messageType}`);
           }
         } catch (downloadError) {
-          this.logger.error(`[Media] Download failed: ${downloadError.message}`);
+          this.logger.error(`[Media] Download failed for ${messageType}: ${downloadError.message}`);
         }
       }
 
@@ -532,14 +543,14 @@ export class WhatsappService implements OnModuleInit {
         externalNumber: phoneNumber,
         leadId: lead?._id?.toString() || null,
         direction,
-        content,
-        messageType,
-        mediaUrl,
+        content: content || '',
+        messageType: messageType || 'text',
+        mediaUrl: mediaUrl || null,
         status: 'delivered',
         waMessageId: msg.key.id,
         timestamp: FieldValue.serverTimestamp(),
-        unresolvedLid: unresolved,
-        lidJid: fromJid.endsWith('@lid') ? fromJid : null
+        unresolvedLid: !!unresolved,
+        lidJid: (fromJid.endsWith('@lid') ? fromJid : null) || null
       });
 
       this.logger.log(`[Incoming] Message saved to Firestore: whatsappChannels/${channelId}/messages/${messageRef.id}`);
@@ -690,7 +701,7 @@ export class WhatsappService implements OnModuleInit {
     return channel;
   }
 
-  async sendMessage(channelId: string, leadId: string, content: string, agentId: string, messageType: string = 'text', mediaUrl?: string) {
+  async sendMessage(channelId: string, leadId: string, content: string, agentId: string, agentName: string = 'System', messageType: string = 'text', mediaUrl?: string) {
     const channel = await this.channelModel.findById(channelId);
     if (!channel) throw new NotFoundException('Channel not found');
 
@@ -705,6 +716,7 @@ export class WhatsappService implements OnModuleInit {
       leadId,
       content,
       agentId,
+      agentName,
       messageType,
       mediaUrl
     }, {
@@ -717,7 +729,7 @@ export class WhatsappService implements OnModuleInit {
     return { jobId: job.id, status: 'queued' };
   }
 
-  async sendDirectMessage(channelId: string, leadId: string, content: string, agentId: string, messageType: string = 'text', mediaUrl?: string) {
+  async sendDirectMessage(channelId: string, leadId: string, content: string, agentId: string, agentName: string = 'System', messageType: string = 'text', mediaUrl?: string) {
     this.logger.log(`sendDirectMessage: Attempting to send ${messageType} to lead ${leadId} via channel ${channelId}`);
     
     const channel = await this.channelModel.findById(channelId);
@@ -750,16 +762,17 @@ export class WhatsappService implements OnModuleInit {
     const cleanPhone = lead.phone.replace(/\D/g, '');
     const jid = `${cleanPhone}@s.whatsapp.net`;
 
-    let result: any;
-    if (messageType === 'sticker' && mediaUrl) {
-      result = await sock.sendMessage(jid, { sticker: { url: mediaUrl } });
-    } else if (messageType === 'audio' && mediaUrl) {
-      result = await sock.sendMessage(jid, { audio: { url: mediaUrl }, ptt: true });
-    } else if (messageType === 'image' && mediaUrl) {
-      result = await sock.sendMessage(jid, { image: { url: mediaUrl }, caption: content });
-    } else {
-      result = await sock.sendMessage(jid, { text: content });
-    }
+    const result = await (async () => {
+      if (messageType === 'sticker' && mediaUrl) {
+        return await sock.sendMessage(jid, { sticker: { url: mediaUrl } });
+      } else if (messageType === 'audio' && mediaUrl) {
+        return await sock.sendMessage(jid, { audio: { url: mediaUrl }, ptt: true });
+      } else if (messageType === 'image' && mediaUrl) {
+        return await sock.sendMessage(jid, { image: { url: mediaUrl }, caption: content });
+      } else {
+        return await sock.sendMessage(jid, { text: content });
+      }
+    })();
 
     if (!result) throw new Error('Failed to send message');
     
@@ -768,18 +781,28 @@ export class WhatsappService implements OnModuleInit {
 
     try {
       this.logger.log(`[Firestore] Saving outbound message to MongoDB...`);
+      
+      // Fallback content for DB if empty (for media)
+      let dbContent = content;
+      if (!dbContent) {
+        if (messageType === 'sticker') dbContent = '[Sticker]';
+        else if (messageType === 'audio') dbContent = '[Voice Note]';
+        else if (messageType === 'image') dbContent = '[Image]';
+      }
+
       const newMessage = new this.messageModel({
         channelId: channel._id,
         leadId: lead._id,
         externalNumber: cleanPhone,
         direction: 'outbound',
-        content,
+        content: dbContent || '',
         messageType,
         mediaUrl,
         waMessageId: result.key.id,
         timestamp: new Date(),
         status: 'sent',
-        sentByAgent: new Types.ObjectId(agentId)
+        sentByAgent: new Types.ObjectId(agentId),
+        sentByAgentName: agentName
       });
 
       await newMessage.save();
@@ -793,11 +816,12 @@ export class WhatsappService implements OnModuleInit {
         externalNumber: cleanPhone,
         leadId: lead._id.toString(),
         direction: 'outbound',
-        content,
+        content: dbContent || '',
         messageType,
-        mediaUrl,
+        mediaUrl: mediaUrl || null,
         status: 'sent',
         sentByAgent: agentId,
+        sentByAgentName: agentName || 'System',
         waMessageId: result.key.id,
         timestamp: FieldValue.serverTimestamp(),
       };

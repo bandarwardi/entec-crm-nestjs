@@ -51,9 +51,19 @@ export class WhatsappController {
     @Body('channelId') channelId: string,
     @Body('leadId') leadId: string,
     @Body('content') content: string,
+    @Body('messageType') messageType: string,
+    @Body('mediaUrl') mediaUrl: string,
     @Request() req: any
   ) {
-    return this.whatsappService.sendMessage(channelId, leadId, content, req.user.userId);
+    return this.whatsappService.sendMessage(
+      channelId, 
+      leadId, 
+      content, 
+      req.user.userId, 
+      req.user.name, 
+      messageType, 
+      mediaUrl
+    );
   }
 
   @Get('channels/:channelId/messages/:phoneNumber')

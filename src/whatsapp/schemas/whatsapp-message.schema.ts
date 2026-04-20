@@ -17,7 +17,7 @@ export class WhatsappMessage {
   @Prop({ required: true, enum: ['inbound', 'outbound'] })
   direction: 'inbound' | 'outbound';
 
-  @Prop({ required: true })
+  @Prop({ default: '' })
   content: string;
 
   @Prop({ default: 'text' })

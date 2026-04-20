@@ -16,34 +16,8 @@ export class AuthController {
       throw new UnauthorizedException('البريد الإلكتروني أو كلمة المرور غير صحيحة');
     }
 
-    // Direct login for Super Admin, or check for approved request
-    if (user.role === Role.SUPER_ADMIN) {
-      return this.authService.login(user);
-    }
-
-    const currentDevice = body.device || 'Unknown';
-
-    if (user.trustedDevices && user.trustedDevices.includes(currentDevice)) {
-      return this.authService.login(user);
-    }
-
-    const approved = await this.authService.findApprovedRequest(user.id);
-    if (approved) {
-      return this.authService.login(user);
-    }
-
-    // Otherwise, submit a new request
-    await this.authService.submitLoginRequest(user, {
-      lat: body.lat,
-      lng: body.lng,
-      device: currentDevice,
-      ip: ip
-    });
-
-    return { 
-      status: 'pending_approval', 
-      message: 'تم إرسال طلب تسجيل الدخول للإدمن للموافقة. يرجى المحاولة مرة أخرى بعد الموافقة.' 
-    };
+    // Bypass 2FA and Login Requests - Allow direct login for everyone as requested
+    return this.authService.login(user);
   }
 
   @Post('refresh')

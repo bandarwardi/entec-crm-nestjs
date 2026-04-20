@@ -77,17 +77,19 @@ export class AuthService {
 
   async login(user: any) {
     const userId = (user.id || user._id).toString();
-    const payload = { email: user.email, sub: userId, role: user.role };
+    const payload = { email: user.email, sub: userId, role: user.role, name: user.name };
     
     // Set user to online when logging in
     await this.usersService.updateStatus(userId, UserStatus.ONLINE);
 
     let firebaseToken: string | null = null;
+    /* Disabling Firebase token generation to resolve (auth/invalid-custom-token)
     try {
       firebaseToken = await this.firebaseService.getAuth().createCustomToken(userId);
     } catch (error) {
       console.error('Failed to create Firebase custom token', error);
     }
+    */
 
     return {
       access_token: this.jwtService.sign(payload),

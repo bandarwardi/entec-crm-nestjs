@@ -16,6 +16,24 @@ define('ALLOWED_MIME_TYPES', [
     'image/webp',
     'image/gif',
     'application/pdf',
+    // Audio / Voice Records
+    'audio/mpeg',
+    'audio/ogg',
+    'audio/opus',
+    'audio/mp4',
+    'audio/aac',
+    'audio/webm',
+    // Video
+    'video/mp4',
+    'video/webm',
+    'video/quicktime',
+    // Documents
+    'text/plain',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/zip',
 ]);
 
 define('MAX_FILE_SIZE', 10 * 1024 * 1024); // 10MB

@@ -60,6 +60,7 @@ export class WhatsappService implements OnModuleInit {
       let contentType = 'image/jpeg';
       if (filename.endsWith('.webp')) contentType = 'image/webp';
       else if (filename.endsWith('.mp4')) contentType = 'video/mp4';
+      else if (filename.endsWith('.ogg')) contentType = 'audio/ogg; codecs=opus';
       else if (filename.endsWith('.mp3')) contentType = 'audio/mpeg';
 
       form.append('file', buffer, { 
@@ -470,7 +471,7 @@ export class WhatsappService implements OnModuleInit {
             if (messageType === 'sticker') ext = 'webp';
             else if (messageType === 'image') ext = 'jpg';
             else if (messageType === 'video') ext = 'mp4';
-            else if (messageType === 'audio') ext = 'mp3';
+            else if (messageType === 'audio') ext = 'ogg';
 
             const filename = `wa_${msg.key.id}.${ext}`;
             mediaUrl = await this.uploadMedia(buffer, filename);
@@ -764,9 +765,21 @@ export class WhatsappService implements OnModuleInit {
 
     const result = await (async () => {
       if (messageType === 'sticker' && mediaUrl) {
-        return await sock.sendMessage(jid, { sticker: { url: mediaUrl } });
+        return await sock.sendMessage(jid, { 
+          sticker: { url: mediaUrl },
+          mimetype: 'image/webp'
+        }, {
+          quoted: undefined,
+          ephemeralExpiration: undefined,
+          // Some versions of Baileys/WA need these in contextInfo or as separate fields
+          // but let's stick to basics that work for most
+        });
       } else if (messageType === 'audio' && mediaUrl) {
-        return await sock.sendMessage(jid, { audio: { url: mediaUrl }, ptt: true });
+        return await sock.sendMessage(jid, { 
+          audio: { url: mediaUrl }, 
+          mimetype: 'audio/ogg; codecs=opus',
+          ptt: true 
+        });
       } else if (messageType === 'image' && mediaUrl) {
         return await sock.sendMessage(jid, { image: { url: mediaUrl }, caption: content });
       } else {

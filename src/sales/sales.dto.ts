@@ -5,14 +5,16 @@ import { OrderStatus } from './order-status.enum';
 
 export class CreateCustomerDto {
   @IsString()
-  name: string;
+  @IsOptional()
+  name?: string;
 
   @IsEmail()
   @IsOptional()
   email?: string;
 
   @IsString()
-  phone: string;
+  @IsOptional()
+  phone?: string;
 
   @IsString()
   @IsOptional()
@@ -39,13 +41,16 @@ export class UpdateCustomerDto extends CreateCustomerDto {}
 
 export class CreateDeviceDto {
   @IsString()
-  macAddress: string;
+  @IsOptional()
+  macAddress?: string;
 
   @IsString()
-  deviceKey: string;
+  @IsOptional()
+  deviceKey?: string;
 
   @IsString()
-  deviceName: string;
+  @IsOptional()
+  deviceName?: string;
 }
 
 export class CreateOrderDto {
@@ -66,17 +71,20 @@ export class CreateOrderDto {
   closerAgentId?: string;
 
   @IsEnum(OrderType)
-  type: OrderType;
+  @IsOptional()
+  type?: OrderType;
 
   @IsString()
   @IsOptional()
   referrerName?: string;
 
   @IsNumber()
-  amount: number;
+  @IsOptional()
+  amount?: number;
 
   @IsString()
-  paymentMethod: string;
+  @IsOptional()
+  paymentMethod?: string;
 
   @IsString()
   @IsOptional()

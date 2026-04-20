@@ -10,8 +10,8 @@ import { Role } from '../users/roles.enum';
 import { UploadProxyService } from '../common/upload-proxy.service';
 
 @Controller('sales')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.AGENT)
+// @UseGuards(JwtAuthGuard, RolesGuard)
+// @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.AGENT)
 export class SalesController {
   constructor(
     private readonly salesService: SalesService,

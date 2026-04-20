@@ -234,16 +234,9 @@ export class SalesService {
   }
 
   async createOrder(dto: CreateOrderDto) {
-    // Existence check for agents
-    const leadAgent = await this.userModel.findById(dto.leadAgentId).exec();
-    const closerAgent = await this.userModel.findById(dto.closerAgentId).exec();
-
-    if (!leadAgent) {
-      throw new NotFoundException('الموظف الذي جلب العميل غير موجود - CREATE');
-    }
-    if (!closerAgent) {
-      throw new NotFoundException('الموظف الذي أغلق الطلب غير موجود - CREATE');
-    }
+    // Existence check for agents (Relaxed)
+    const leadAgent = dto.leadAgentId ? await this.userModel.findById(dto.leadAgentId).exec() : null;
+    const closerAgent = dto.closerAgentId ? await this.userModel.findById(dto.closerAgentId).exec() : null;
 
     let customerId = dto.customerId ? new Types.ObjectId(dto.customerId) : null;
 
@@ -290,14 +283,16 @@ export class SalesService {
 
     if (dto.leadAgentId && dto.leadAgentId !== 'undefined') {
       const leadAgent = await this.userModel.findById(dto.leadAgentId).exec();
-      if (!leadAgent) throw new NotFoundException('الموظف الذي جلب العميل غير موجود - UPDATE');
-      updateData.leadAgent = new Types.ObjectId(dto.leadAgentId);
+      if (leadAgent) {
+        updateData.leadAgent = new Types.ObjectId(dto.leadAgentId);
+      }
     }
 
     if (dto.closerAgentId && dto.closerAgentId !== 'undefined') {
       const closerAgent = await this.userModel.findById(dto.closerAgentId).exec();
-      if (!closerAgent) throw new NotFoundException('الموظف الذي أغلق الطلب غير موجود - UPDATE');
-      updateData.closerAgent = new Types.ObjectId(dto.closerAgentId);
+      if (closerAgent) {
+        updateData.closerAgent = new Types.ObjectId(dto.closerAgentId);
+      }
     }
 
     if (dto.customerId) {

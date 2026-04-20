@@ -173,12 +173,19 @@ export class WhatsappService implements OnModuleInit {
       const fromJid = msg.key.remoteJid;
       if (!fromJid) return;
 
+      // Ensure we get the actual sender number
+      // In private chats, remoteJid is the other person's number
       const phoneNumber = fromJid.split('@')[0].replace(/\D/g, '');
-      this.logger.log(`[Incoming] New message from ${phoneNumber} on channel ${channelId}`);
       
-      const content = msg.message?.conversation || 
-                      msg.message?.extendedTextMessage?.text || 
-                      '[Non-text message]';
+      // Check if this is a message from the system to itself (Message Yourself)
+      const isSelf = msg.key.fromMe || (msg.participant && msg.participant.includes(phoneNumber));
+      
+      this.logger.log(`[Incoming] New message from ${phoneNumber} on channel ${channelId}. IsSelf: ${isSelf}`);
+      
+      if (msg.key.fromMe) {
+        this.logger.debug(`[Incoming] Skipping message because it's marked as fromMe (Outbound from another device)`);
+        return;
+      }
 
       // Try to find a matching lead by phone number
       // Match by the end of the number to handle different formats (with/without country code)

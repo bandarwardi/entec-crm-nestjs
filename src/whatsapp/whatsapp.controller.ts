@@ -7,7 +7,8 @@ import {
   Body, 
   UseGuards, 
   Request,
-  Patch 
+  Patch,
+  Query
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { WhatsappService } from './whatsapp.service';
@@ -50,6 +51,7 @@ export class WhatsappController {
   sendMessage(
     @Body('channelId') channelId: string,
     @Body('leadId') leadId: string,
+    @Body('phoneNumber') phoneNumber: string,
     @Body('content') content: string,
     @Body('messageType') messageType: string,
     @Body('mediaUrl') mediaUrl: string,
@@ -58,6 +60,7 @@ export class WhatsappController {
     return this.whatsappService.sendMessage(
       channelId, 
       leadId, 
+      phoneNumber,
       content, 
       req.user.userId, 
       req.user.name, 
@@ -72,5 +75,13 @@ export class WhatsappController {
     @Param('phoneNumber') phoneNumber: string
   ) {
     return this.whatsappService.getMessages(channelId, phoneNumber);
+  }
+
+  @Get('channels/:channelId/check-number')
+  async checkNumber(
+    @Param('channelId') channelId: string,
+    @Query('phoneNumber') phoneNumber: string
+  ) {
+    return this.whatsappService.checkPhoneNumber(channelId, phoneNumber);
   }
 }

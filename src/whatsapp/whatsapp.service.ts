@@ -735,11 +735,28 @@ export class WhatsappService implements OnModuleInit {
     return channel;
   }
 
-  async sendMessage(channelId: string, leadId: string, content: string, agentId: string, agentName: string = 'System', messageType: string = 'text', mediaUrl?: string) {
+  async sendMessage(channelId: string, leadId: string, phoneNumber: string, content: string, agentId: string, agentName: string = 'System', messageType: string = 'text', mediaUrl?: string) {
     const channel = await this.channelModel.findById(channelId);
     if (!channel) throw new NotFoundException('Channel not found');
 
-    const lead = await this.leadModel.findById(leadId);
+    let lead: any = null;
+    if (leadId) {
+      lead = await this.leadModel.findById(leadId);
+    } else if (phoneNumber) {
+      const cleanPhone = phoneNumber.replace(/\D/g, '');
+      const last8 = cleanPhone.slice(-8);
+      lead = await this.leadModel.findOne({ phone: { $regex: last8 + '$' } }).exec();
+      
+      if (!lead) {
+        lead = new this.leadModel({
+          name: phoneNumber,
+          phone: cleanPhone,
+          status: LeadStatus.NEW,
+          createdBy: new Types.ObjectId(agentId)
+        });
+        await lead.save();
+      }
+    }
     if (!lead) throw new NotFoundException('Lead not found');
 
     // Create a temporary message in DBs with 'pending' status for immediate UI feedback
@@ -788,10 +805,10 @@ export class WhatsappService implements OnModuleInit {
       });
 
       // 3. Add to queue for actual sending
-      const jobId = `send_${leadId}_${Buffer.from(content.substring(0, 20)).toString('hex')}_${Date.now()}`;
+      const jobId = `send_${lead._id}_${Buffer.from(content.substring(0, 20)).toString('hex')}_${Date.now()}`;
       await this.messageQueue.add('send-message', {
         channelId,
-        leadId,
+        leadId: lead._id.toString(),
         content,
         agentId,
         agentName,
@@ -968,5 +985,27 @@ export class WhatsappService implements OnModuleInit {
     .sort({ timestamp: 1 })
     .limit(100)
     .exec();
+  }
+
+  async checkPhoneNumber(channelId: string, phoneNumber: string) {
+    const channel = await this.channelModel.findById(channelId);
+    if (!channel) throw new NotFoundException('Channel not found');
+
+    const sock = this.sessions.get(channel.sessionId);
+    if (!sock || channel.status !== 'connected') {
+      throw new Error('قناة واتساب غير متصلة');
+    }
+
+    const cleanPhone = phoneNumber.replace(/\D/g, '');
+    const jid = `${cleanPhone}@s.whatsapp.net`;
+    
+    try {
+      const results = await sock.onWhatsApp(jid);
+      if (!results || results.length === 0) return { jid, exists: false };
+      return results[0];
+    } catch (error) {
+      this.logger.error(`Error checking WhatsApp number: ${error.message}`);
+      throw new Error('فشل التحقق من الرقم في واتساب');
+    }
   }
 }

@@ -405,7 +405,7 @@ export class WhatsappService implements OnModuleInit {
       sock.ev.on('messages.upsert', async (m) => {
         if (m.type === 'notify') {
           for (const msg of m.messages) {
-            if (!msg.key.fromMe && msg.message) {
+            if (msg.message) {
               await this.handleIncomingMessage(channelId, sessionId, msg);
             }
           }
@@ -709,28 +709,77 @@ export class WhatsappService implements OnModuleInit {
     const lead = await this.leadModel.findById(leadId);
     if (!lead) throw new NotFoundException('Lead not found');
 
-    // Add to queue with deduplication based on content and leadId
-    const jobId = `send_${leadId}_${Buffer.from(content.substring(0, 20)).toString('hex')}_${Date.now()}`;
+    // Create a temporary message in DBs with 'pending' status for immediate UI feedback
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     
-    const job = await this.messageQueue.add('send-message', {
-      channelId,
-      leadId,
-      content,
-      agentId,
-      agentName,
-      messageType,
-      mediaUrl
-    }, {
-      jobId, // Use specific jobId to help prevent duplicates
-      attempts: 1, // Only try once to avoid banning
-      removeOnComplete: true,
-      removeOnFail: true
-    });
+    let dbContent = content;
+    if (!dbContent) {
+      if (messageType === 'sticker') dbContent = '[Sticker]';
+      else if (messageType === 'audio') dbContent = '[Voice Note]';
+      else if (messageType === 'image') dbContent = '[Image]';
+    }
 
-    return { jobId: job.id, status: 'queued' };
+    try {
+      // 1. Save to MongoDB as pending
+      const newMessage = new this.messageModel({
+        channelId: channel._id,
+        leadId: lead._id,
+        externalNumber: lead.phone.replace(/\D/g, ''),
+        direction: 'outbound',
+        content: dbContent || '',
+        messageType,
+        mediaUrl,
+        waMessageId: tempId,
+        timestamp: new Date(),
+        status: 'pending',
+        sentByAgent: new Types.ObjectId(agentId),
+        sentByAgentName: agentName
+      });
+      await newMessage.save();
+
+      // 2. Save to Firestore as pending
+      const db = this.firebaseService.getFirestore();
+      const messageRef = db.collection('whatsappChannels').doc(channelId).collection('messages').doc();
+      await messageRef.set({
+        externalNumber: lead.phone.replace(/\D/g, ''),
+        leadId: lead._id.toString(),
+        direction: 'outbound',
+        content: dbContent || '',
+        messageType,
+        mediaUrl: mediaUrl || null,
+        status: 'pending',
+        sentByAgent: agentId,
+        sentByAgentName: agentName || 'System',
+        waMessageId: tempId,
+        timestamp: FieldValue.serverTimestamp(),
+      });
+
+      // 3. Add to queue for actual sending
+      const jobId = `send_${leadId}_${Buffer.from(content.substring(0, 20)).toString('hex')}_${Date.now()}`;
+      await this.messageQueue.add('send-message', {
+        channelId,
+        leadId,
+        content,
+        agentId,
+        agentName,
+        messageType,
+        mediaUrl,
+        tempMessageId: tempId // Pass this to update later
+      }, {
+        jobId,
+        attempts: 1,
+        removeOnComplete: true,
+        removeOnFail: true
+      });
+
+      return { success: true, tempId };
+    } catch (error) {
+      this.logger.error(`Failed to create pending message: ${error.message}`);
+      throw error;
+    }
   }
 
-  async sendDirectMessage(channelId: string, leadId: string, content: string, agentId: string, agentName: string = 'System', messageType: string = 'text', mediaUrl?: string) {
+  async sendDirectMessage(channelId: string, leadId: string, content: string, agentId: string, agentName: string = 'System', messageType: string = 'text', mediaUrl?: string, tempMessageId?: string) {
     this.logger.log(`sendDirectMessage: Attempting to send ${messageType} to lead ${leadId} via channel ${channelId}`);
     
     const channel = await this.channelModel.findById(channelId);
@@ -793,7 +842,7 @@ export class WhatsappService implements OnModuleInit {
     await this.leadModel.findByIdAndUpdate(lead._id, { lastMessageAt: new Date() });
 
     try {
-      this.logger.log(`[Firestore] Saving outbound message to MongoDB...`);
+      this.logger.log(`[Firestore] Saving outbound message update...`);
       
       // Fallback content for DB if empty (for media)
       let dbContent = content;
@@ -803,49 +852,70 @@ export class WhatsappService implements OnModuleInit {
         else if (messageType === 'image') dbContent = '[Image]';
       }
 
-      const newMessage = new this.messageModel({
-        channelId: channel._id,
-        leadId: lead._id,
-        externalNumber: cleanPhone,
-        direction: 'outbound',
-        content: dbContent || '',
-        messageType,
-        mediaUrl,
-        waMessageId: result.key.id,
-        timestamp: new Date(),
-        status: 'sent',
-        sentByAgent: new Types.ObjectId(agentId),
-        sentByAgentName: agentName
-      });
+      if (tempMessageId) {
+        // Update the existing pending message
+        await this.messageModel.findOneAndUpdate(
+          { waMessageId: tempMessageId },
+          { 
+            waMessageId: result.key.id,
+            status: 'sent',
+            timestamp: new Date()
+          }
+        );
 
-      await newMessage.save();
-      this.logger.log(`[Firestore] Saved to MongoDB. Now saving to Firestore...`);
+        const db = this.firebaseService.getFirestore();
+        const messagesSnapshot = await db.collection('whatsappChannels')
+          .doc(channelId)
+          .collection('messages')
+          .where('waMessageId', '==', tempMessageId)
+          .get();
 
-      // Save to Firestore
-      const db = this.firebaseService.getFirestore();
-      const messageRef = db.collection('whatsappChannels').doc(channelId).collection('messages').doc();
-      
-      const firestoreData = {
-        externalNumber: cleanPhone,
-        leadId: lead._id.toString(),
-        direction: 'outbound',
-        content: dbContent || '',
-        messageType,
-        mediaUrl: mediaUrl || null,
-        status: 'sent',
-        sentByAgent: agentId,
-        sentByAgentName: agentName || 'System',
-        waMessageId: result.key.id,
-        timestamp: FieldValue.serverTimestamp(),
-      };
+        for (const doc of messagesSnapshot.docs) {
+          await doc.ref.update({ 
+            waMessageId: result.key.id,
+            status: 'sent',
+            timestamp: FieldValue.serverTimestamp()
+          });
+        }
+      } else {
+        // Fallback: Create new message if no temp ID provided
+        const newMessage = new this.messageModel({
+          channelId: channel._id,
+          leadId: lead._id,
+          externalNumber: cleanPhone,
+          direction: 'outbound',
+          content: dbContent || '',
+          messageType,
+          mediaUrl,
+          waMessageId: result.key.id,
+          timestamp: new Date(),
+          status: 'sent',
+          sentByAgent: new Types.ObjectId(agentId),
+          sentByAgentName: agentName
+        });
+        await newMessage.save();
 
-      await messageRef.set(firestoreData);
-      this.logger.log(`[Firestore] Successfully saved message to Firestore at path: whatsappChannels/${channelId}/messages/${messageRef.id}`);
+        const db = this.firebaseService.getFirestore();
+        const messageRef = db.collection('whatsappChannels').doc(channelId).collection('messages').doc();
+        await messageRef.set({
+          externalNumber: cleanPhone,
+          leadId: lead._id.toString(),
+          direction: 'outbound',
+          content: dbContent || '',
+          messageType,
+          mediaUrl: mediaUrl || null,
+          status: 'sent',
+          sentByAgent: agentId,
+          sentByAgentName: agentName || 'System',
+          waMessageId: result.key.id,
+          timestamp: FieldValue.serverTimestamp(),
+        });
+      }
 
-      return newMessage;
+      return { success: true, waMessageId: result.key.id };
     } catch (dbError) {
       this.logger.error(`[Firestore] CRITICAL ERROR: Message sent via WhatsApp but failed to save in DBs: ${dbError.message}`);
-      console.error(dbError); // Full stack trace in console
+      console.error(dbError);
       return { success: true, waMessageId: result.key.id };
     }
   }

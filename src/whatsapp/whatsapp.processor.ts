@@ -12,7 +12,7 @@ export class WhatsappProcessor extends WorkerHost {
   }
 
   async process(job: Job<any, any, string>): Promise<any> {
-    const { channelId, leadId, content, agentId, agentName, messageType, mediaUrl } = job.data;
+    const { channelId, leadId, content, agentId, agentName, messageType, mediaUrl, tempMessageId } = job.data;
     
     this.logger.log(`Processing ${messageType || 'text'} message for lead ${leadId} via channel ${channelId} by ${agentName || agentId}`);
     
@@ -20,7 +20,7 @@ export class WhatsappProcessor extends WorkerHost {
       // Small delay to simulate human-like behavior and prevent bans
       await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 3000));
       
-      return await this.whatsappService.sendDirectMessage(channelId, leadId, content, agentId, agentName, messageType, mediaUrl);
+      return await this.whatsappService.sendDirectMessage(channelId, leadId, content, agentId, agentName, messageType, mediaUrl, tempMessageId);
     } catch (error) {
       this.logger.error(`Failed to process message job ${job.id}: ${error.message}`);
       throw error;

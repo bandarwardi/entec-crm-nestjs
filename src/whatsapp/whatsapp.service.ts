@@ -659,6 +659,8 @@ export class WhatsappService implements OnModuleInit {
         status: 'delivered',
         unresolvedLid: unresolved,
         lidJid: fromJid.endsWith('@lid') ? fromJid : undefined,
+        senderJid: msg.key.participant || (direction === 'inbound' ? fromJid : undefined),
+        senderName: msg.pushName || undefined,
         quotedMessageId,
         quotedContent,
         quotedMessageType

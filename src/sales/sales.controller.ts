@@ -18,9 +18,9 @@ export class SalesController {
     private readonly uploadProxy: UploadProxyService,
   ) {}
 
-  @Get('export/excel')
+  @Get('excel-export')
   async exportExcel(@Res() res) {
-    console.log('[SalesController] Exporting Excel...');
+    console.log('[SalesController] CRITICAL: Calling Excel Export Endpoint');
     const buffer = await this.salesService.exportOrdersToExcel();
     res.set({
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

@@ -38,6 +38,14 @@ export class WhatsappController {
     return this.whatsappService.reconnect(id);
   }
 
+  @Post('channels/:id/request-pairing-code')
+  requestPairingCode(
+    @Param('id') id: string,
+    @Body('phoneNumber') phoneNumber: string
+  ) {
+    return this.whatsappService.requestPairingCode(id, phoneNumber);
+  }
+
   @Patch('channels/:id/agents')
   async updateChannelAgents(
     @Param('id') id: string,
@@ -45,6 +53,30 @@ export class WhatsappController {
     @Body('allAgentsAccess') allAgentsAccess: boolean
   ) {
     return this.whatsappService.updateChannelAgents(id, agents, allAgentsAccess);
+  }
+
+  @Get('channels/:id/privacy')
+  async fetchPrivacySettings(@Param('id') id: string) {
+    return this.whatsappService.fetchPrivacySettings(id);
+  }
+
+  @Patch('channels/:id/privacy')
+  async updatePrivacySetting(
+    @Param('id') id: string,
+    @Body('type') type: any,
+    @Body('value') value: any
+  ) {
+    return this.whatsappService.updatePrivacySetting(id, type, value);
+  }
+
+  @Post('channels/:id/status')
+  async sendStatusUpdate(
+    @Param('id') id: string,
+    @Body('content') content: string,
+    @Body('messageType') messageType: string,
+    @Body('mediaUrl') mediaUrl?: string
+  ) {
+    return this.whatsappService.sendStatusUpdate(id, content, messageType, mediaUrl);
   }
 
   @Post('messages/send')
@@ -128,7 +160,92 @@ export class WhatsappController {
   }
 
   @Post('leads/:id/toggle-archive')
-  async toggleArchive(@Param('id') id: string) {
-    return this.whatsappService.toggleArchive(id);
+  async toggleArchive(
+    @Param('id') id: string,
+    @Body('channelId') channelId?: string
+  ) {
+    return this.whatsappService.toggleArchive(id, channelId);
+  }
+
+  @Post('chats/modify')
+  async modifyChat(
+    @Body('channelId') channelId: string,
+    @Body('leadId') leadId: string,
+    @Body('action') action: any
+  ) {
+    return this.whatsappService.modifyChat(channelId, leadId, action);
+  }
+
+  @Post('presence/update')
+  async updatePresence(
+    @Body('channelId') channelId: string,
+    @Body('leadId') leadId: string,
+    @Body('presence') presence: any
+  ) {
+    return this.whatsappService.updatePresence(channelId, leadId, presence);
+  }
+
+  @Post('messages/star')
+  async starMessage(
+    @Body('channelId') channelId: string,
+    @Body('leadId') leadId: string,
+    @Body('messageId') messageId: string,
+    @Body('star') star: boolean
+  ) {
+    return this.whatsappService.starMessage(channelId, leadId, messageId, star);
+  }
+
+  @Post('users/block')
+  async blockUser(
+    @Body('channelId') channelId: string,
+    @Body('leadId') leadId: string,
+    @Body('action') action: 'block' | 'unblock'
+  ) {
+    return this.whatsappService.blockUser(channelId, leadId, action);
+  }
+
+  @Post('groups/create')
+  async createGroup(
+    @Body('channelId') channelId: string,
+    @Body('subject') subject: string,
+    @Body('participants') participants: string[]
+  ) {
+    return this.whatsappService.createGroup(channelId, subject, participants);
+  }
+
+  @Patch('groups/:jid/participants')
+  async updateGroupParticipants(
+    @Param('jid') jid: string,
+    @Body('channelId') channelId: string,
+    @Body('participants') participants: string[],
+    @Body('action') action: 'add' | 'remove' | 'promote' | 'demote'
+  ) {
+    return this.whatsappService.updateGroupParticipants(channelId, jid, participants, action);
+  }
+
+  @Patch('groups/:jid/metadata')
+  async updateGroupMetadata(
+    @Param('jid') jid: string,
+    @Body('channelId') channelId: string,
+    @Body('action') action: 'subject' | 'description' | 'settings',
+    @Body('value') value: string
+  ) {
+    return this.whatsappService.updateGroupMetadata(channelId, jid, action, value);
+  }
+
+  @Post('groups/:jid/leave')
+  async leaveGroup(
+    @Param('jid') jid: string,
+    @Body('channelId') channelId: string
+  ) {
+    return this.whatsappService.leaveGroup(channelId, jid);
+  }
+
+  @Get('groups/:jid/invite-code')
+  async getGroupInviteCode(
+    @Param('jid') jid: string,
+    @Query('channelId') channelId: string
+  ) {
+    return this.whatsappService.getGroupInviteCode(channelId, jid);
   }
 }

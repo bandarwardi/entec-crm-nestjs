@@ -245,6 +245,19 @@ export class WhatsappService implements OnModuleInit {
         browser: ['EN TEC CRM', 'Chrome', '1.0.0'],
         generateHighQualityLinkPreview: true,
         logger: this.pinoLogger as any,
+        getMessage: async (key) => {
+          const msg = await this.messageModel.findOne({ waMessageId: key.id }).exec();
+          if (msg) {
+            return {
+              conversation: msg.content
+            };
+          }
+          return undefined;
+        },
+        cachedGroupMetadata: async (jid) => {
+          // Implementing group metadata cache lookup
+          return undefined; // We'll improve this with a NodeCache instance later
+        }
       });
 
       this.sessions.set(sessionId, sock);
@@ -1028,20 +1041,67 @@ export class WhatsappService implements OnModuleInit {
       } else if (messageType === 'audio' && mediaUrl) {
         return await sock.sendMessage(jid, { 
           audio: { url: mediaUrl }, 
-          mimetype: 'audio/mpeg', // Use standard audio mimetype
+          mimetype: 'audio/mpeg', 
           ptt: false 
         }, options);
+      } else if (messageType === 'location') {
+        const [lat, lng, name, address] = content.split('|');
+        return await sock.sendMessage(jid, { 
+          location: { 
+            degreesLatitude: parseFloat(lat) || 0, 
+            degreesLongitude: parseFloat(lng) || 0,
+            name: name || undefined,
+            address: address || undefined
+          } 
+        }, options);
+      } else if (messageType === 'contact') {
+        const [displayName, vcard] = content.split('|');
+        return await sock.sendMessage(jid, { 
+          contacts: {
+            displayName: displayName || 'Contact',
+            contacts: [{ vcard }]
+          }
+        }, options);
+      } else if (messageType === 'reaction') {
+        return await sock.sendMessage(jid, { 
+          react: { text: content, key: { remoteJid: jid, fromMe: true, id: quotedMessageId } } 
+        });
+      } else if (messageType === 'poll') {
+        const [name, ...values] = content.split('|');
+        return await sock.sendMessage(jid, { 
+          poll: {
+            name: name || 'Poll',
+            values: values.length > 0 ? values : ['Yes', 'No'],
+            selectableCount: 1
+          }
+        }, options);
+      } else if (messageType === 'forward' && quotedMessageId) {
+        const msg = await this.messageModel.findOne({ waMessageId: quotedMessageId }).exec();
+        if (msg) {
+          return await sock.sendMessage(jid, { forward: { key: { remoteJid: jid, fromMe: msg.direction === 'outbound', id: quotedMessageId }, message: { conversation: msg.content } } }, options);
+        }
+      } else if (messageType === 'edit' && quotedMessageId) {
+        return await sock.sendMessage(jid, { 
+          text: content, 
+          edit: { remoteJid: jid, fromMe: true, id: quotedMessageId } 
+        }, options);
       } else if (messageType === 'document' && mediaUrl) {
-        const fileName = content || 'Document';
+        const fileName = (content && content !== 'null') ? content : 'Document';
         return await sock.sendMessage(jid, { 
           document: { url: mediaUrl }, 
-          fileName: fileName.includes('.') ? fileName : `${fileName}.pdf`,
-          mimetype: 'application/pdf' // Default to PDF if not specified, WA will handle others
+          mimetype: 'application/octet-stream',
+          fileName: fileName
+        }, options);
+      } else if (messageType === 'video' && mediaUrl) {
+        return await sock.sendMessage(jid, { 
+          video: { url: mediaUrl }, 
+          caption: content !== 'null' ? content : undefined 
         }, options);
       } else if (messageType === 'image' && mediaUrl) {
-        return await sock.sendMessage(jid, { image: { url: mediaUrl }, caption: content }, options);
-      } else if (messageType === 'video' && mediaUrl) {
-        return await sock.sendMessage(jid, { video: { url: mediaUrl }, caption: content }, options);
+        return await sock.sendMessage(jid, { 
+          image: { url: mediaUrl }, 
+          caption: content !== 'null' ? content : undefined 
+        }, options);
       } else {
         return await sock.sendMessage(jid, { text: content }, options);
       }
@@ -1300,13 +1360,22 @@ export class WhatsappService implements OnModuleInit {
     return await this.templateModel.findByIdAndDelete(id).exec();
   }
 
-  async toggleArchive(leadId: string) {
+  async toggleArchive(leadId: string, channelId?: string) {
     const lead = await this.leadModel.findById(leadId);
     if (!lead) throw new NotFoundException('Lead not found');
     
     const newState = !lead.isArchived;
     await this.leadModel.findByIdAndUpdate(leadId, { isArchived: newState });
     
+    // If channelId is provided, try to archive it on WhatsApp too
+    if (channelId) {
+      try {
+        await this.modifyChat(channelId, leadId, newState ? 'archive' : 'unarchive');
+      } catch (e) {
+        this.logger.error(`Failed to toggle archive on WhatsApp: ${e.message}`);
+      }
+    }
+
     // Sync to Firestore
     try {
       const db = this.firebaseService.getFirestore();
@@ -1317,5 +1386,175 @@ export class WhatsappService implements OnModuleInit {
     } catch (e) {}
     
     return { success: true, isArchived: newState };
+  }
+
+  async modifyChat(channelId: string, leadId: string, action: 'archive' | 'unarchive' | 'mute' | 'unmute' | 'pin' | 'unpin' | 'markRead' | 'markUnread' | 'delete') {
+    const { sock, jid } = await this.getSocketAndJid(channelId, leadId);
+    
+    const lastMsg = await this.messageModel.findOne({ leadId }).sort({ createdAt: -1 }).exec();
+    const lastMessages = lastMsg ? [{ 
+      key: { remoteJid: jid, fromMe: lastMsg.direction === 'outbound', id: lastMsg.waMessageId }, 
+      messageTimestamp: Math.floor(lastMsg.createdAt.getTime() / 1000) 
+    }] : [];
+
+    switch (action) {
+      case 'archive':
+        return await sock.chatModify({ archive: true, lastMessages }, jid);
+      case 'unarchive':
+        return await sock.chatModify({ archive: false, lastMessages }, jid);
+      case 'mute':
+        return await sock.chatModify({ mute: 8 * 60 * 60 * 1000 }, jid);
+      case 'unmute':
+        return await sock.chatModify({ mute: null }, jid);
+      case 'pin':
+        return await sock.chatModify({ pin: true }, jid);
+      case 'unpin':
+        return await sock.chatModify({ pin: false }, jid);
+      case 'markRead':
+        if (lastMsg) await sock.readMessages([lastMessages[0].key]);
+        return { success: true };
+      case 'delete':
+        return await sock.chatModify({ delete: true, lastMessages }, jid);
+    }
+  }
+
+  async updatePresence(channelId: string, leadId: string, presence: 'available' | 'unavailable' | 'composing' | 'recording') {
+    const { sock, jid } = await this.getSocketAndJid(channelId, leadId);
+    return await sock.sendPresenceUpdate(presence, jid);
+  }
+
+  async starMessage(channelId: string, leadId: string, messageId: string, star: boolean) {
+    const { sock, jid } = await this.getSocketAndJid(channelId, leadId);
+    const msg = await this.messageModel.findOne({ waMessageId: messageId }).exec();
+    if (!msg) throw new NotFoundException('Message not found');
+
+    return await sock.chatModify({
+      star: {
+        messages: [{ id: messageId, fromMe: msg.direction === 'outbound' }],
+        star
+      }
+    }, jid);
+  }
+
+  async blockUser(channelId: string, leadId: string, action: 'block' | 'unblock') {
+    const { sock, jid } = await this.getSocketAndJid(channelId, leadId);
+    return await sock.updateBlockStatus(jid, action);
+  }
+
+  async requestPairingCode(channelId: string, phoneNumber: string) {
+    const channel = await this.channelModel.findById(channelId);
+    if (!channel) throw new NotFoundException('Channel not found');
+    const sock = this.sessions.get(channel.sessionId);
+    if (!sock) throw new Error('WhatsApp session not connected');
+
+    const cleanPhone = phoneNumber.replace(/\D/g, '');
+    return await sock.requestPairingCode(cleanPhone);
+  }
+
+  async createGroup(channelId: string, subject: string, participants: string[]) {
+    const channel = await this.channelModel.findById(channelId);
+    if (!channel) throw new NotFoundException('Channel not found');
+    const sock = this.sessions.get(channel.sessionId);
+    if (!sock) throw new Error('WhatsApp session not connected');
+
+    const formattedParticipants = participants.map(p => p.includes('@') ? p : `${p.replace(/\D/g, '')}@s.whatsapp.net`);
+    return await sock.groupCreate(subject, formattedParticipants);
+  }
+
+  async updateGroupParticipants(channelId: string, groupJid: string, participants: string[], action: 'add' | 'remove' | 'promote' | 'demote') {
+    const channel = await this.channelModel.findById(channelId);
+    if (!channel) throw new NotFoundException('Channel not found');
+    const sock = this.sessions.get(channel.sessionId);
+    if (!sock) throw new Error('WhatsApp session not connected');
+
+    const formattedParticipants = participants.map(p => p.includes('@') ? p : `${p.replace(/\D/g, '')}@s.whatsapp.net`);
+    return await sock.groupParticipantsUpdate(groupJid, formattedParticipants, action);
+  }
+
+  async updateGroupMetadata(channelId: string, groupJid: string, action: 'subject' | 'description' | 'settings', value: string) {
+    const channel = await this.channelModel.findById(channelId);
+    if (!channel) throw new NotFoundException('Channel not found');
+    const sock = this.sessions.get(channel.sessionId);
+    if (!sock) throw new Error('WhatsApp session not connected');
+
+    if (action === 'subject') return await sock.groupUpdateSubject(groupJid, value);
+    if (action === 'description') return await sock.groupUpdateDescription(groupJid, value);
+    if (action === 'settings') return await sock.groupSettingUpdate(groupJid, value as any);
+  }
+
+  async leaveGroup(channelId: string, groupJid: string) {
+    const channel = await this.channelModel.findById(channelId);
+    if (!channel) throw new NotFoundException('Channel not found');
+    const sock = this.sessions.get(channel.sessionId);
+    if (!sock) throw new Error('WhatsApp session not connected');
+
+    return await sock.groupLeave(groupJid);
+  }
+
+  async getGroupInviteCode(channelId: string, groupJid: string) {
+    const channel = await this.channelModel.findById(channelId);
+    if (!channel) throw new NotFoundException('Channel not found');
+    const sock = this.sessions.get(channel.sessionId);
+    if (!sock) throw new Error('WhatsApp session not connected');
+
+    return await sock.groupInviteCode(groupJid);
+  }
+
+  async fetchPrivacySettings(channelId: string) {
+    const channel = await this.channelModel.findById(channelId);
+    if (!channel) throw new NotFoundException('Channel not found');
+    const sock = this.sessions.get(channel.sessionId);
+    if (!sock) throw new Error('WhatsApp session not connected');
+
+    return await sock.fetchPrivacySettings(true);
+  }
+
+  async updatePrivacySetting(channelId: string, type: 'last' | 'online' | 'profile' | 'status' | 'read' | 'group', value: any) {
+    const channel = await this.channelModel.findById(channelId);
+    if (!channel) throw new NotFoundException('Channel not found');
+    const sock = this.sessions.get(channel.sessionId);
+    if (!sock) throw new Error('WhatsApp session not connected');
+
+    switch (type) {
+      case 'last': return await sock.updateLastSeenPrivacy(value);
+      case 'online': return await sock.updateOnlinePrivacy(value);
+      case 'profile': return await sock.updateProfilePicturePrivacy(value);
+      case 'status': return await sock.updateStatusPrivacy(value);
+      case 'read': return await sock.updateReadReceiptsPrivacy(value);
+      case 'group': return await sock.updateGroupsAddPrivacy(value);
+    }
+  }
+
+  async sendStatusUpdate(channelId: string, content: string, messageType: string = 'text', mediaUrl?: string) {
+    const channel = await this.channelModel.findById(channelId);
+    if (!channel) throw new NotFoundException('Channel not found');
+    const sock = this.sessions.get(channel.sessionId);
+    if (!sock) throw new Error('WhatsApp session not connected');
+
+    const statusJidList = ['status@broadcast'];
+    const message: any = {};
+    
+    if (messageType === 'image') message.image = { url: mediaUrl };
+    else if (messageType === 'video') message.video = { url: mediaUrl };
+    else message.text = content;
+
+    return await sock.sendMessage('status@broadcast', message, { statusJidList });
+  }
+
+  private async getSocketAndJid(channelId: string, leadId: string) {
+    const channel = await this.channelModel.findById(channelId);
+    if (!channel) throw new NotFoundException('Channel not found');
+    
+    const lead = await this.leadModel.findById(leadId);
+    if (!lead) throw new NotFoundException('Lead not found');
+
+    const sock = this.sessions.get(channel.sessionId);
+    if (!sock) throw new Error('WhatsApp session not connected (try refreshing)');
+
+    const cleanPhone = lead.phone.replace(/\D/g, '');
+    const isGroup = lead.isGroup || lead.phone.endsWith('@g.us');
+    const jid = isGroup ? lead.phone : `${cleanPhone}@s.whatsapp.net`;
+
+    return { sock, jid, isGroup };
   }
 }

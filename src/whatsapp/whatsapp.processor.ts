@@ -18,7 +18,7 @@ export class WhatsappProcessor extends WorkerHost {
     
     try {
       // Small delay to simulate human-like behavior and prevent bans
-      await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 3000));
+      await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
       
       return await this.whatsappService.sendDirectMessage(channelId, leadId, content, agentId, agentName, messageType, mediaUrl, tempMessageId);
     } catch (error) {

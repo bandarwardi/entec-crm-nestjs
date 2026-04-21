@@ -153,7 +153,7 @@ export class WhatsappService implements OnModuleInit {
     this.logger.log('Initializing WhatsApp Service...');
     const channels = await this.channelModel.find({ isActive: true }).exec();
     for (const channel of channels) {
-      if (channel.status === 'connected') {
+      if (channel.status === 'connected' || channel.status === 'qr_pending') {
         this.initSession(channel);
       }
     }
@@ -1457,7 +1457,11 @@ export class WhatsappService implements OnModuleInit {
   async requestPairingCode(channelId: string, phoneNumber: string) {
     const channel = await this.channelModel.findById(channelId);
     if (!channel) throw new NotFoundException('Channel not found');
-    const sock = this.sessions.get(channel.sessionId);
+    let sock = this.sessions.get(channel.sessionId);
+    if (!sock) {
+      await this.initSession(channel as any);
+      sock = this.sessions.get(channel.sessionId);
+    }
     if (!sock) throw new Error('WhatsApp session not connected');
 
     const cleanPhone = phoneNumber.replace(/\D/g, '');
@@ -1586,7 +1590,12 @@ export class WhatsappService implements OnModuleInit {
     const lead = await this.leadModel.findById(leadId);
     if (!lead) throw new NotFoundException('Lead not found');
 
-    const sock = this.sessions.get(channel.sessionId);
+    let sock = this.sessions.get(channel.sessionId);
+    if (!sock) {
+      this.logger.log(`Session mising for sending message on channel ${channelId}, auto-initializing...`);
+      await this.initSession(channel as any);
+      sock = this.sessions.get(channel.sessionId);
+    }
     if (!sock) throw new Error('WhatsApp session not connected (try refreshing)');
 
     const cleanPhone = lead.phone.replace(/\D/g, '');

@@ -204,6 +204,15 @@ export class WhatsappController {
     return this.whatsappService.blockUser(channelId, leadId, action);
   }
 
+  @Post('leads/:id/fetch-history')
+  async fetchHistory(
+    @Param('id') leadId: string,
+    @Body('channelId') channelId: string,
+    @Body('count') count: number
+  ) {
+    return this.whatsappService.fetchOldMessages(channelId, leadId, count);
+  }
+
   @Post('groups/create')
   async createGroup(
     @Body('channelId') channelId: string,

@@ -438,6 +438,19 @@ export class WhatsappService implements OnModuleInit {
         }
       });
 
+      sock.ev.on('messaging-history.set', async ({ messages, chats, contacts, isLatest }) => {
+        this.logger.log(`[History Sync] Received ${messages.length} messages, ${chats.length} chats, ${contacts.length} contacts. isLatest: ${isLatest}`);
+        
+        // Process messages in batches to avoid overwhelming the system
+        for (const msg of messages) {
+          try {
+            await this.handleIncomingMessage(channelId, sessionId, msg);
+          } catch (e) {
+            // Silently fail for individual historical messages to keep sync moving
+          }
+        }
+      });
+
       sock.ev.on('messages.update', async (updates) => {
         for (const update of updates) {
           if (update.update.status) {
@@ -1539,6 +1552,29 @@ export class WhatsappService implements OnModuleInit {
     else message.text = content;
 
     return await sock.sendMessage('status@broadcast', message, { statusJidList });
+  }
+
+  async fetchOldMessages(channelId: string, leadId: string, count: number = 50) {
+    const { sock, jid } = await this.getSocketAndJid(channelId, leadId);
+    
+    // Find the oldest message we have for this lead to use as anchor
+    const oldestMsg = await this.messageModel.findOne({ leadId }).sort({ timestamp: 1 }).exec();
+    
+    this.logger.log(`[History Fetch] Fetching ${count} messages for ${jid} before ${oldestMsg?.timestamp || 'now'}`);
+
+    const history = await sock.fetchMessageHistory(
+      count,
+      oldestMsg ? { id: oldestMsg.waMessageId, fromMe: oldestMsg.direction === 'outbound' } : undefined,
+      oldestMsg ? Math.floor(oldestMsg.timestamp.getTime() / 1000) : undefined
+    );
+
+    for (const msg of history) {
+       try {
+         await this.handleIncomingMessage(channelId, '', msg as any);
+       } catch (e) {}
+    }
+
+    return { count: history.length };
   }
 
   private async getSocketAndJid(channelId: string, leadId: string) {

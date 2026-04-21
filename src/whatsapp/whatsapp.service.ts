@@ -928,8 +928,9 @@ export class WhatsappService implements OnModuleInit {
         agentName,
         messageType,
         mediaUrl,
-        tempMessageId: tempId, // Pass this to update later
-        quotedMessageId
+        tempMessageId: tempId,
+        quotedMessageId,
+        quotedContent
       }, {
         jobId,
         attempts: 1,
@@ -944,7 +945,7 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
-  async sendDirectMessage(channelId: string, leadId: string, content: string, agentId: string, agentName: string = 'System', messageType: string = 'text', mediaUrl?: string, tempMessageId?: string, quotedMessageId?: string) {
+  async sendDirectMessage(channelId: string, leadId: string, content: string, agentId: string, agentName: string = 'System', messageType: string = 'text', mediaUrl?: string, tempMessageId?: string, quotedMessageId?: string, quotedContent?: string) {
     this.logger.log(`sendDirectMessage: Attempting to send ${messageType} to lead ${leadId} via channel ${channelId}`);
     
     const channel = await this.channelModel.findById(channelId);
@@ -981,19 +982,29 @@ export class WhatsappService implements OnModuleInit {
     const result = await (async () => {
       const options: any = {};
       if (quotedMessageId) {
+        this.logger.debug(`[Send] Message is a reply to ${quotedMessageId}`);
         // Find the quoted message to get its key
         const quotedMsg = await this.messageModel.findOne({ waMessageId: quotedMessageId }).exec();
-        if (quotedMsg) {
-          options.quoted = {
-            key: {
-              remoteJid: jid,
-              fromMe: quotedMsg.direction === 'outbound',
-              id: quotedMessageId,
-              participant: lead.isGroup ? (quotedMsg.senderJid || undefined) : undefined
-            },
-            message: { [quotedMsg.messageType === 'text' ? 'conversation' : quotedMsg.messageType + 'Message']: quotedMsg.content }
-          };
+        
+        const finalQuotedContent = quotedMsg?.content || quotedContent || '';
+        const isFromMe = quotedMsg ? quotedMsg.direction === 'outbound' : false;
+        
+        // In groups, participant is required. In 1:1 it's the other person's Jid if not from me.
+        let participant = quotedMsg?.senderJid;
+        if (!participant && !isFromMe) {
+            participant = isGroup ? undefined : jid;
         }
+
+        options.quoted = {
+          key: {
+            remoteJid: jid,
+            fromMe: isFromMe,
+            id: quotedMessageId,
+            participant: isGroup ? participant : undefined
+          },
+          message: { conversation: finalQuotedContent }
+        };
+        this.logger.debug(`[Send] Quoted object created: ${JSON.stringify(options.quoted.key)}`);
       }
 
       if (messageType === 'sticker' && mediaUrl) {

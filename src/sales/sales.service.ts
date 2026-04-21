@@ -343,11 +343,20 @@ export class SalesService {
       { header: 'موظف الإغلاق', key: 'closerAgent', width: 20 },
       { header: 'اسم السيرفر', key: 'serverName', width: 15 },
       { header: 'تاريخ انتهاء السيرفر', key: 'serverExpiryDate', width: 15 },
+      { header: 'جهاز 1 - MAC', key: 'd1_mac', width: 18 },
+      { header: 'جهاز 1 - Key', key: 'd1_key', width: 15 },
+      { header: 'جهاز 1 - اسم', key: 'd1_name', width: 15 },
+      { header: 'جهاز 2 - MAC', key: 'd2_mac', width: 18 },
+      { header: 'جهاز 2 - Key', key: 'd2_key', width: 15 },
+      { header: 'جهاز 2 - اسم', key: 'd2_name', width: 15 },
+      { header: 'جهاز 3 - MAC', key: 'd3_mac', width: 18 },
+      { header: 'جهاز 3 - Key', key: 'd3_key', width: 15 },
+      { header: 'جهاز 3 - اسم', key: 'd3_name', width: 15 },
       { header: 'ملاحظات', key: 'notes', width: 30 },
     ];
 
     orders.forEach(order => {
-      worksheet.addRow({
+      const rowData: any = {
         id: order._id.toString(),
         customerName: (order.customer as any)?.name || '',
         customerPhone: (order.customer as any)?.phone || '',
@@ -361,7 +370,20 @@ export class SalesService {
         serverName: order.serverName || '',
         serverExpiryDate: order.serverExpiryDate ? order.serverExpiryDate.toISOString().split('T')[0] : '',
         notes: order.notes || '',
-      });
+      };
+
+      // Add device data (up to 3 for now to keep sheet manageable, can be more)
+      if (order.devices && order.devices.length > 0) {
+        order.devices.forEach((d, idx) => {
+          if (idx < 3) {
+            rowData[`d${idx + 1}_mac`] = d.macAddress;
+            rowData[`d${idx + 1}_key`] = d.deviceKey;
+            rowData[`d${idx + 1}_name`] = d.deviceName;
+          }
+        });
+      }
+
+      worksheet.addRow(rowData);
     });
 
     return await workbook.xlsx.writeBuffer();
@@ -399,7 +421,18 @@ export class SalesService {
         const leadAgentName = row.getCell(9).value?.toString();
         const closerAgentName = row.getCell(10).value?.toString();
         const serverName = row.getCell(11).value?.toString();
-        const notes = row.getCell(13).value?.toString();
+        const notes = row.getCell(21).value?.toString(); // Adjust notes column since we added devices
+
+        // Devices
+        const devices = [];
+        for (let d = 0; d < 3; d++) {
+          const mac = row.getCell(13 + d * 3).value?.toString();
+          const key = row.getCell(14 + d * 3).value?.toString();
+          const name = row.getCell(15 + d * 3).value?.toString();
+          if (mac || key) {
+             devices.push({ macAddress: mac || '', deviceKey: key || '', deviceName: name || '' });
+          }
+        }
 
         // 1. Find or Create Customer
         let customer = await this.customerModel.findOne({ phone: customerPhone }).exec();
@@ -428,7 +461,7 @@ export class SalesService {
           closerAgent: closerAgent?._id || agents[0]?._id,
           serverName,
           notes,
-          devices: []
+          devices: devices
         });
 
         await order.save();

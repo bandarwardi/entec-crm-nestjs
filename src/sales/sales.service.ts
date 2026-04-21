@@ -424,7 +424,7 @@ export class SalesService {
         const notes = row.getCell(21).value?.toString(); // Adjust notes column since we added devices
 
         // Devices
-        const devices = [];
+        const devices: any[] = [];
         for (let d = 0; d < 3; d++) {
           const mac = row.getCell(13 + d * 3).value?.toString();
           const key = row.getCell(14 + d * 3).value?.toString();

@@ -84,4 +84,22 @@ export class WhatsappController {
   ) {
     return this.whatsappService.checkPhoneNumber(channelId, phoneNumber);
   }
+
+  @Get('ai-settings')
+  getAiSettings() {
+    return this.whatsappService.getAiSettings();
+  }
+
+  @Post('ai-settings')
+  updateAiSettings(@Body() data: any) {
+    return this.whatsappService.updateAiSettings(data);
+  }
+
+  @Post('ai-suggest')
+  generateAiSuggestion(
+    @Body('channelId') channelId: string,
+    @Body('phoneNumber') phoneNumber: string
+  ) {
+    return this.whatsappService.generateAiSuggestion(channelId, phoneNumber);
+  }
 }

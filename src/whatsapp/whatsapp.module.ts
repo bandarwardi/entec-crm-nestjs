@@ -9,6 +9,7 @@ import { WhatsappController } from './whatsapp.controller';
 import { WhatsappProcessor } from './whatsapp.processor';
 import { Lead, LeadSchema } from '../leads/schemas/lead.schema';
 import { UsersModule } from '../users/users.module';
+import { AiSettings, AiSettingsSchema } from './schemas/ai-settings.schema';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { UsersModule } from '../users/users.module';
       { name: WhatsappMessage.name, schema: WhatsappMessageSchema },
       { name: WhatsappSession.name, schema: WhatsappSessionSchema },
       { name: Lead.name, schema: LeadSchema },
+      { name: AiSettings.name, schema: AiSettingsSchema },
     ]),
     BullModule.registerQueue({
       name: 'whatsapp-messages',

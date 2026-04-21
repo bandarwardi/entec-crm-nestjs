@@ -29,6 +29,8 @@ import { UsersService } from '../users/users.service';
 import { FirebaseService } from '../firebase/firebase.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { FieldValue } from 'firebase-admin/firestore';
+import { AiSettings, AiSettingsDocument } from './schemas/ai-settings.schema';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 @Injectable()
 export class WhatsappService implements OnModuleInit {
@@ -37,17 +39,25 @@ export class WhatsappService implements OnModuleInit {
   private sessions = new Map<string, WASocket>();
   private lidMaps = new Map<string, Map<string, string>>();
 
+  private genAI: GoogleGenerativeAI;
+
   constructor(
     @InjectModel(WhatsappChannel.name) private channelModel: Model<WhatsappChannelDocument>,
     @InjectModel(WhatsappMessage.name) private messageModel: Model<WhatsappMessageDocument>,
     @InjectModel(WhatsappSession.name) private sessionModel: Model<WhatsappSessionDocument>,
     @InjectModel(Lead.name) private leadModel: Model<LeadDocument>,
+    @InjectModel(AiSettings.name) private aiSettingsModel: Model<AiSettingsDocument>,
     private readonly usersService: UsersService,
     private readonly firebaseService: FirebaseService,
     private readonly notificationsService: NotificationsService,
     private readonly configService: ConfigService,
     @InjectQueue('whatsapp-messages') private messageQueue: Queue,
-  ) {}
+  ) {
+    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
+    if (apiKey) {
+      this.genAI = new GoogleGenerativeAI(apiKey);
+    }
+  }
 
   private async uploadMedia(buffer: Buffer, filename: string): Promise<string | null> {
     try {
@@ -1012,16 +1022,72 @@ export class WhatsappService implements OnModuleInit {
   formatPhoneForWhatsapp(phone: string): string {
     let cleaned = phone.replace(/\D/g, '');
 
-    // US Number: 10 digits (e.g. 9739018888 -> 19739018888)
+    // US Number: 10 digits
     if (cleaned.length === 10) {
       cleaned = '1' + cleaned;
     }
 
-    // Egyptian Number: 11 digits starting with 01 (e.g. 01103017683 -> 201103017683)
+    // Egyptian Number: 11 digits starting with 01
     if (cleaned.length === 11 && cleaned.startsWith('01')) {
       cleaned = '2' + cleaned;
     }
 
     return cleaned;
+  }
+
+  async getAiSettings() {
+    let settings = await this.aiSettingsModel.findOne().exec();
+    if (!settings) {
+      settings = new this.aiSettingsModel({});
+      await settings.save();
+    }
+    return settings;
+  }
+
+  async updateAiSettings(data: any) {
+    let settings = await this.aiSettingsModel.findOne().exec();
+    if (!settings) {
+      settings = new this.aiSettingsModel(data);
+    } else {
+      Object.assign(settings, data);
+    }
+    return settings.save();
+  }
+
+  async generateAiSuggestion(channelId: string, phoneNumber: string) {
+    try {
+      const settings = await this.getAiSettings();
+      if (!settings.isEnabled || !this.genAI) {
+        return { suggestion: null };
+      }
+
+      // Fetch last 10 messages for context
+      const messages = await this.messageModel.find({
+        channelId: new Types.ObjectId(channelId),
+        externalNumber: phoneNumber
+      })
+      .sort({ timestamp: -1 })
+      .limit(10)
+      .exec();
+
+      if (messages.length === 0) return { suggestion: null };
+
+      // Reverse to get chronological order
+      const chatContext = messages.reverse().map(m => 
+        `${m.direction === 'inbound' ? 'العميل' : 'نحن'}: ${m.content}`
+      ).join('\n');
+
+      const model = this.genAI.getGenerativeModel({ model: settings.model || 'gemini-1.5-flash' });
+      
+      const prompt = `التالي هو سياق آخر المحادثات في واتساب:\n${chatContext}\n\nبناءً على المعلومات التالية عن الشركة والمهمة:\n${settings.systemPrompt}\n\nاقترح رداً ذكياً وقصيراً ومهنياً ليقوم الموظف بإرساله للعميل الآن. اقترح النص فقط دون أي تعليقات جانبية.`;
+
+      const result = await model.generateContent(prompt);
+      const suggestion = result.response.text().trim();
+      
+      return { suggestion };
+    } catch (error) {
+      this.logger.error(`AI Suggestion Error: ${error.message}`);
+      return { suggestion: null };
+    }
   }
 }

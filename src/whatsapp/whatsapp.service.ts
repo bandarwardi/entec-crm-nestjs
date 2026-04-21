@@ -1562,11 +1562,13 @@ export class WhatsappService implements OnModuleInit {
     
     this.logger.log(`[History Fetch] Fetching ${count} messages for ${jid} before ${oldestMsg?.timestamp || 'now'}`);
 
-    const history = await sock.fetchMessageHistory(
+    const historyResult: any = await (sock as any).fetchMessageHistory(
       count,
-      oldestMsg ? { id: oldestMsg.waMessageId, fromMe: oldestMsg.direction === 'outbound' } as any : undefined,
+      oldestMsg ? { id: oldestMsg.waMessageId, fromMe: oldestMsg.direction === 'outbound' } : undefined,
       oldestMsg ? Math.floor(oldestMsg.timestamp.getTime() / 1000) : undefined
     );
+
+    const history = Array.isArray(historyResult) ? historyResult : [];
 
     for (const msg of history) {
        try {

@@ -58,6 +58,9 @@ export class WhatsappMessage {
 
   @Prop()
   quotedMessageType: string;
+
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const WhatsappMessageSchema = SchemaFactory.createForClass(WhatsappMessage);

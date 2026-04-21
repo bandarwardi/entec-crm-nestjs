@@ -1391,10 +1391,10 @@ export class WhatsappService implements OnModuleInit {
   async modifyChat(channelId: string, leadId: string, action: 'archive' | 'unarchive' | 'mute' | 'unmute' | 'pin' | 'unpin' | 'markRead' | 'markUnread' | 'delete') {
     const { sock, jid } = await this.getSocketAndJid(channelId, leadId);
     
-    const lastMsg = await this.messageModel.findOne({ leadId }).sort({ createdAt: -1 }).exec();
+    const lastMsg = await this.messageModel.findOne({ leadId }).sort({ timestamp: -1 }).exec();
     const lastMessages = lastMsg ? [{ 
       key: { remoteJid: jid, fromMe: lastMsg.direction === 'outbound', id: lastMsg.waMessageId }, 
-      messageTimestamp: Math.floor(lastMsg.createdAt.getTime() / 1000) 
+      messageTimestamp: Math.floor(lastMsg.timestamp.getTime() / 1000) 
     }] : [];
 
     switch (action) {

@@ -59,6 +59,9 @@ export class Order {
   @Prop()
   invoiceFile: string;
 
+  @Prop({ type: Date })
+  subscriptionDate: Date;
+
   id: string;
   createdAt: Date;
   updatedAt: Date;

@@ -128,6 +128,10 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   invoiceFile?: string;
+
+  @IsOptional()
+  @IsDateString()
+  subscriptionDate?: string;
 }
 
 export class UpdateOrderDto extends CreateOrderDto {}

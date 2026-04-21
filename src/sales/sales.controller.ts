@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, UseInterceptors, UploadedFile, BadRequestException, Res } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { SalesService } from './sales.service';
@@ -108,5 +108,23 @@ export class SalesController {
     if (!file) throw new BadRequestException('No file uploaded');
     const url = await this.uploadProxy.uploadFile(file);
     return { url };
+  }
+
+  @Get('export/excel')
+  async exportExcel(@Body() body: any, @Param() params: any, @Query() query: any, @Res() res) {
+    const buffer = await this.salesService.exportOrdersToExcel();
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename=Sales-Export.xlsx',
+      'Content-Length': (buffer as any).length,
+    });
+    res.end(buffer);
+  }
+
+  @Post('import/excel')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  async importExcel(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('يجب رفع ملف إكسيل');
+    return this.salesService.importOrdersFromExcel(file.buffer);
   }
 }

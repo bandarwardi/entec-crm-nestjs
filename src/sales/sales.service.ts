@@ -11,6 +11,8 @@ import { CreateCustomerDto, UpdateCustomerDto, CreateOrderDto, UpdateOrderDto, Q
 import { OrderStatus } from './order-status.enum';
 import { EmailService } from '../email/email.service';
 import { InvoicePdfService } from './invoice-pdf.service';
+import * as ExcelJS from 'exceljs';
+import { Readable } from 'stream';
 
 @Injectable()
 export class SalesService {
@@ -263,6 +265,7 @@ export class SalesService {
       leadAgent: new Types.ObjectId(dto.leadAgentId),
       closerAgent: new Types.ObjectId(dto.closerAgentId),
       devices: dto.devices || [],
+      subscriptionDate: dto.subscriptionDate ? new Date(dto.subscriptionDate) : new Date(),
     });
 
     const savedOrder = await order.save();
@@ -299,6 +302,10 @@ export class SalesService {
       updateData.customer = new Types.ObjectId(dto.customerId);
     }
 
+    if (dto.subscriptionDate) {
+      updateData.subscriptionDate = new Date(dto.subscriptionDate);
+    }
+
     const updated = await this.orderModel.findByIdAndUpdate(id, updateData, { new: true }).exec();
     if (updated) {
       await updated.populate('customer leadAgent closerAgent');
@@ -312,6 +319,126 @@ export class SalesService {
     if (!result) throw new NotFoundException('الطلب غير موجود');
     await this.invalidateDashboardCache();
     return { success: true };
+  }
+
+  async exportOrdersToExcel() {
+    const orders = await this.orderModel.find()
+      .populate('customer leadAgent closerAgent')
+      .sort({ createdAt: -1 })
+      .exec();
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('المبيعات');
+
+    worksheet.columns = [
+      { header: 'ID', key: 'id', width: 25 },
+      { header: 'اسم العميل', key: 'customerName', width: 25 },
+      { header: 'هاتف العميل', key: 'customerPhone', width: 15 },
+      { header: 'تاريخ الاشتراك', key: 'subscriptionDate', width: 15 },
+      { header: 'المبلغ', key: 'amount', width: 10 },
+      { header: 'نوع الطلب', key: 'type', width: 10 },
+      { header: 'الحالة', key: 'status', width: 10 },
+      { header: 'طريقة الدفع', key: 'paymentMethod', width: 15 },
+      { header: 'موظف الجذب', key: 'leadAgent', width: 20 },
+      { header: 'موظف الإغلاق', key: 'closerAgent', width: 20 },
+      { header: 'اسم السيرفر', key: 'serverName', width: 15 },
+      { header: 'تاريخ انتهاء السيرفر', key: 'serverExpiryDate', width: 15 },
+      { header: 'ملاحظات', key: 'notes', width: 30 },
+    ];
+
+    orders.forEach(order => {
+      worksheet.addRow({
+        id: order._id.toString(),
+        customerName: (order.customer as any)?.name || '',
+        customerPhone: (order.customer as any)?.phone || '',
+        subscriptionDate: order.subscriptionDate ? order.subscriptionDate.toISOString().split('T')[0] : (order as any).createdAt?.toISOString().split('T')[0],
+        amount: order.amount,
+        type: order.type,
+        status: order.status,
+        paymentMethod: order.paymentMethod,
+        leadAgent: (order.leadAgent as any)?.name || '',
+        closerAgent: (order.closerAgent as any)?.name || '',
+        serverName: order.serverName || '',
+        serverExpiryDate: order.serverExpiryDate ? order.serverExpiryDate.toISOString().split('T')[0] : '',
+        notes: order.notes || '',
+      });
+    });
+
+    return await workbook.xlsx.writeBuffer();
+  }
+
+  async importOrdersFromExcel(fileBuffer: Buffer) {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(fileBuffer);
+    const worksheet = workbook.getWorksheet(1);
+    
+    const results = {
+      success: 0,
+      failed: 0,
+      errors: []
+    };
+
+    const agents = await this.userModel.find({ role: { $in: ['admin', 'agent'] } }).exec();
+
+    // Process rows
+    for (let i = 2; i <= worksheet.rowCount; i++) {
+      const row = worksheet.getRow(i);
+      if (!row.getCell(2).value) continue; // Skip if no customer name
+
+      try {
+        const customerName = row.getCell(2).value?.toString();
+        const customerPhone = row.getCell(3).value?.toString()?.replace(/\D/g, '');
+        const subDateStr = row.getCell(4).value?.toString();
+        const subDate = subDateStr ? new Date(subDateStr) : new Date();
+        const amount = Number(row.getCell(5).value) || 0;
+        const type = row.getCell(6).value?.toString() || 'new';
+        const status = row.getCell(7).value?.toString() || 'completed';
+        const paymentMethod = row.getCell(8).value?.toString() || 'cash';
+        const leadAgentName = row.getCell(9).value?.toString();
+        const closerAgentName = row.getCell(10).value?.toString();
+        const serverName = row.getCell(11).value?.toString();
+        const notes = row.getCell(13).value?.toString();
+
+        // 1. Find or Create Customer
+        let customer = await this.customerModel.findOne({ phone: customerPhone }).exec();
+        if (!customer && customerPhone) {
+          customer = new this.customerModel({
+            name: customerName,
+            phone: customerPhone,
+            address: 'Imported',
+          });
+          await customer.save();
+        }
+
+        // 2. Map Agents
+        const leadAgent = agents.find(a => a.name === leadAgentName);
+        const closerAgent = agents.find(a => a.name === closerAgentName);
+
+        // 3. Create Order
+        const order = new this.orderModel({
+          customer: customer?._id,
+          subscriptionDate: subDate,
+          amount,
+          type,
+          status,
+          paymentMethod,
+          leadAgent: leadAgent?._id || agents[0]?._id,
+          closerAgent: closerAgent?._id || agents[0]?._id,
+          serverName,
+          notes,
+          devices: []
+        });
+
+        await order.save();
+        results.success++;
+      } catch (err) {
+        results.failed++;
+        results.errors.push(`Row ${i}: ${err.message}`);
+      }
+    }
+
+    await this.invalidateDashboardCache();
+    return results;
   }
 
   async removeCustomer(id: string) {

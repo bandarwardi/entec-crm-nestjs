@@ -1564,7 +1564,7 @@ export class WhatsappService implements OnModuleInit {
 
     const history = await sock.fetchMessageHistory(
       count,
-      oldestMsg ? { id: oldestMsg.waMessageId, fromMe: oldestMsg.direction === 'outbound' } : undefined,
+      oldestMsg ? { id: oldestMsg.waMessageId, fromMe: oldestMsg.direction === 'outbound' } as any : undefined,
       oldestMsg ? Math.floor(oldestMsg.timestamp.getTime() / 1000) : undefined
     );
 

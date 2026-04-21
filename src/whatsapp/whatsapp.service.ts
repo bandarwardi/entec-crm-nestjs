@@ -982,17 +982,21 @@ export class WhatsappService implements OnModuleInit {
     const result = await (async () => {
       const options: any = {};
       if (quotedMessageId) {
-        this.logger.debug(`[Send] Message is a reply to ${quotedMessageId}`);
+        this.logger.debug(`[SendQuote] Attempting to quote message ID: ${quotedMessageId}`);
         // Find the quoted message to get its key
         const quotedMsg = await this.messageModel.findOne({ waMessageId: quotedMessageId }).exec();
         
-        const finalQuotedContent = quotedMsg?.content || quotedContent || '';
+        const finalQuotedContent = quotedMsg?.content || quotedContent || 'Message';
         const isFromMe = quotedMsg ? quotedMsg.direction === 'outbound' : false;
         
-        // In groups, participant is required. In 1:1 it's the other person's Jid if not from me.
-        let participant = quotedMsg?.senderJid;
-        if (!participant && !isFromMe) {
-            participant = isGroup ? undefined : jid;
+        // Resolve own JID
+        const ownJid = jidNormalizedUser(sock.user?.id);
+
+        // Determine participant JID
+        // In groups, participant is mandatory. In 1:1, Baileys often expects it if we quote others.
+        let participantJid = quotedMsg?.senderJid;
+        if (!participantJid) {
+            participantJid = isFromMe ? ownJid : jid;
         }
 
         options.quoted = {
@@ -1000,11 +1004,20 @@ export class WhatsappService implements OnModuleInit {
             remoteJid: jid,
             fromMe: isFromMe,
             id: quotedMessageId,
-            participant: isGroup ? participant : undefined
+            participant: isGroup ? participantJid : (isFromMe ? undefined : participantJid)
           },
-          message: { conversation: finalQuotedContent }
+          message: { 
+            conversation: finalQuotedContent 
+          }
         };
-        this.logger.debug(`[Send] Quoted object created: ${JSON.stringify(options.quoted.key)}`);
+
+        this.logger.debug(`[SendQuote] Final Quoted Data: ${JSON.stringify({
+           id: options.quoted.key.id,
+           fromMe: options.quoted.key.fromMe,
+           participant: options.quoted.key.participant,
+           remoteJid: options.quoted.key.remoteJid,
+           content: finalQuotedContent.substring(0, 20)
+        })}`);
       }
 
       if (messageType === 'sticker' && mediaUrl) {

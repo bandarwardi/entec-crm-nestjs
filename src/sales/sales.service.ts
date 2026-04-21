@@ -340,18 +340,34 @@ export class SalesService {
       { header: 'الحالة', key: 'status', width: 10 },
       { header: 'طريقة الدفع', key: 'paymentMethod', width: 15 },
       { header: 'موظف الجذب', key: 'leadAgent', width: 20 },
+      { header: 'البريد الإلكتروني', key: 'customerEmail', width: 25 },
+      { header: 'العنوان', key: 'customerAddress', width: 30 },
+      { header: 'الولاية', key: 'customerState', width: 15 },
+      { header: 'الدولة', key: 'customerCountry', width: 15 },
+      { header: 'خط العرض (Lat)', key: 'customerLat', width: 12 },
+      { header: 'خط الطول (Lng)', key: 'customerLng', width: 12 },
+      { header: 'تاريخ الاشتراك (تاريخ البيع)', key: 'subscriptionDate', width: 18 },
+      { header: 'المبلغ', key: 'amount', width: 12 },
+      { header: 'نوع الطلب', key: 'type', width: 12 },
+      { header: 'الحالة', key: 'status', width: 12 },
+      { header: 'طريقة الدفع', key: 'paymentMethod', width: 15 },
+      { header: 'الموظف (Lead)', key: 'leadAgent', width: 20 },
       { header: 'موظف الإغلاق', key: 'closerAgent', width: 20 },
       { header: 'اسم السيرفر', key: 'serverName', width: 15 },
       { header: 'تاريخ انتهاء السيرفر', key: 'serverExpiryDate', width: 15 },
+      { header: 'نوع التطبيق', key: 'appType', width: 15 },
+      { header: 'عدد السنوات', key: 'appYears', width: 10 },
+      { header: 'تاريخ انتهاء التطبيق', key: 'appExpiryDate', width: 15 },
+      { header: 'اسم الموصي (Referrer)', key: 'referrerName', width: 20 },
       { header: 'جهاز 1 - MAC', key: 'd1_mac', width: 18 },
       { header: 'جهاز 1 - Key', key: 'd1_key', width: 15 },
       { header: 'جهاز 1 - اسم', key: 'd1_name', width: 15 },
       { header: 'جهاز 2 - MAC', key: 'd2_mac', width: 18 },
-      { header: 'جهاز 2 - Key', key: 'd2_key', width: 15 },
-      { header: 'جهاز 2 - اسم', key: 'd2_name', width: 15 },
       { header: 'جهاز 3 - MAC', key: 'd3_mac', width: 18 },
-      { header: 'جهاز 3 - Key', key: 'd3_key', width: 15 },
-      { header: 'جهاز 3 - اسم', key: 'd3_name', width: 15 },
+      { header: 'جهاز 4 - MAC', key: 'd4_mac', width: 18 },
+      { header: 'جهاز 5 - MAC', key: 'd5_mac', width: 18 },
+      { header: 'المرفقات (روابط)', key: 'attachments', width: 40 },
+      { header: 'رابط الفاتورة', key: 'invoiceFile', width: 40 },
       { header: 'ملاحظات', key: 'notes', width: 30 },
     ];
 
@@ -360,6 +376,12 @@ export class SalesService {
         id: order._id.toString(),
         customerName: (order.customer as any)?.name || '',
         customerPhone: (order.customer as any)?.phone || '',
+        customerEmail: (order.customer as any)?.email || '',
+        customerAddress: (order.customer as any)?.address || '',
+        customerState: (order.customer as any)?.state || '',
+        customerCountry: (order.customer as any)?.country || '',
+        customerLat: (order.customer as any)?.latitude || '',
+        customerLng: (order.customer as any)?.longitude || '',
         subscriptionDate: order.subscriptionDate ? order.subscriptionDate.toISOString().split('T')[0] : (order as any).createdAt?.toISOString().split('T')[0],
         amount: order.amount,
         type: order.type,
@@ -369,13 +391,18 @@ export class SalesService {
         closerAgent: (order.closerAgent as any)?.name || '',
         serverName: order.serverName || '',
         serverExpiryDate: order.serverExpiryDate ? order.serverExpiryDate.toISOString().split('T')[0] : '',
+        appType: order.appType || '',
+        appYears: order.appYears || '',
+        appExpiryDate: order.appExpiryDate ? (typeof order.appExpiryDate === 'string' ? order.appExpiryDate : (order.appExpiryDate as any).toISOString().split('T')[0]) : '',
+        referrerName: order.referrerName || '',
+        attachments: (order.attachments || []).join(', '),
+        invoiceFile: order.invoiceFile || '',
         notes: order.notes || '',
       };
 
-      // Add device data (up to 3 for now to keep sheet manageable, can be more)
       if (order.devices && order.devices.length > 0) {
         order.devices.forEach((d, idx) => {
-          if (idx < 3) {
+          if (idx < 5) {
             rowData[`d${idx + 1}_mac`] = d.macAddress;
             rowData[`d${idx + 1}_key`] = d.deviceKey;
             rowData[`d${idx + 1}_name`] = d.deviceName;
@@ -412,27 +439,46 @@ export class SalesService {
       try {
         const customerName = row.getCell(2).value?.toString();
         const customerPhone = row.getCell(3).value?.toString()?.replace(/\D/g, '');
-        const subDateStr = row.getCell(4).value?.toString();
-        const subDate = subDateStr ? new Date(subDateStr) : new Date();
-        const amount = Number(row.getCell(5).value) || 0;
-        const type = row.getCell(6).value?.toString() || 'new';
-        const status = row.getCell(7).value?.toString() || 'completed';
-        const paymentMethod = row.getCell(8).value?.toString() || 'cash';
-        const leadAgentName = row.getCell(9).value?.toString();
-        const closerAgentName = row.getCell(10).value?.toString();
-        const serverName = row.getCell(11).value?.toString();
-        const notes = row.getCell(21).value?.toString(); // Adjust notes column since we added devices
+        const customerEmail = row.getCell(4).value?.toString();
+        const customerAddress = row.getCell(5).value?.toString();
+        const customerState = row.getCell(6).value?.toString();
+        const customerCountry = row.getCell(7).value?.toString();
+        const customerLat = Number(row.getCell(8).value) || null;
+        const customerLng = Number(row.getCell(9).value) || null;
 
-        // Devices
+        const subDateStr = row.getCell(10).value?.toString();
+        const subDate = subDateStr ? new Date(subDateStr) : new Date();
+        const amount = Number(row.getCell(11).value) || 0;
+        const type = row.getCell(12).value?.toString() || 'new';
+        const status = row.getCell(13).value?.toString() || 'completed';
+        const paymentMethod = row.getCell(14).value?.toString() || 'cash';
+        const leadAgentName = row.getCell(15).value?.toString();
+        const closerAgentName = row.getCell(16).value?.toString();
+        const serverName = row.getCell(17).value?.toString();
+        const serverExpiryStr = row.getCell(18).value?.toString();
+        const serverExpiryDate = serverExpiryStr ? new Date(serverExpiryStr) : null;
+        
+        const appType = row.getCell(19).value?.toString();
+        const appYears = Number(row.getCell(20).value) || 1;
+        const appExpiryStr = row.getCell(21).value?.toString();
+        const appExpiryDate = appExpiryStr ? new Date(appExpiryStr) : null;
+        const referrerName = row.getCell(22).value?.toString();
+
+        // Devices (Cols 23-37)
         const devices: any[] = [];
-        for (let d = 0; d < 3; d++) {
-          const mac = row.getCell(13 + d * 3).value?.toString();
-          const key = row.getCell(14 + d * 3).value?.toString();
-          const name = row.getCell(15 + d * 3).value?.toString();
+        for (let d = 0; d < 5; d++) {
+          const mac = row.getCell(23 + d * 3).value?.toString();
+          const key = row.getCell(24 + d * 3).value?.toString();
+          const name = row.getCell(25 + d * 3).value?.toString();
           if (mac || key) {
              devices.push({ macAddress: mac || '', deviceKey: key || '', deviceName: name || '' });
           }
         }
+
+        const attachmentsStr = row.getCell(38).value?.toString();
+        const attachments = attachmentsStr ? attachmentsStr.split(',').map(s => s.trim()) : [];
+        const invoiceFile = row.getCell(39).value?.toString();
+        const notes = row.getCell(40).value?.toString();
 
         // 1. Find or Create Customer
         let customer = await this.customerModel.findOne({ phone: customerPhone }).exec();
@@ -440,7 +486,12 @@ export class SalesService {
           customer = new this.customerModel({
             name: customerName,
             phone: customerPhone,
-            address: 'Imported',
+            email: customerEmail,
+            address: customerAddress,
+            state: customerState,
+            country: customerCountry,
+            latitude: customerLat,
+            longitude: customerLng
           });
           await customer.save();
         }
@@ -460,6 +511,13 @@ export class SalesService {
           leadAgent: leadAgent?._id || agents[0]?._id,
           closerAgent: closerAgent?._id || agents[0]?._id,
           serverName,
+          serverExpiryDate,
+          appType,
+          appYears,
+          appExpiryDate,
+          referrerName,
+          attachments,
+          invoiceFile,
           notes,
           devices: devices
         });

@@ -743,7 +743,7 @@ export class WhatsappService implements OnModuleInit {
     if (leadId) {
       lead = await this.leadModel.findById(leadId);
     } else if (phoneNumber) {
-      const cleanPhone = phoneNumber.replace(/\D/g, '');
+      const cleanPhone = this.formatPhoneForWhatsapp(phoneNumber);
       const last8 = cleanPhone.slice(-8);
       lead = await this.leadModel.findOne({ phone: { $regex: last8 + '$' } }).exec();
       
@@ -996,7 +996,7 @@ export class WhatsappService implements OnModuleInit {
       throw new Error('قناة واتساب غير متصلة');
     }
 
-    const cleanPhone = phoneNumber.replace(/\D/g, '');
+    const cleanPhone = this.formatPhoneForWhatsapp(phoneNumber);
     const jid = `${cleanPhone}@s.whatsapp.net`;
     
     try {
@@ -1007,5 +1007,21 @@ export class WhatsappService implements OnModuleInit {
       this.logger.error(`Error checking WhatsApp number: ${error.message}`);
       throw new Error('فشل التحقق من الرقم في واتساب');
     }
+  }
+
+  formatPhoneForWhatsapp(phone: string): string {
+    let cleaned = phone.replace(/\D/g, '');
+
+    // US Number: 10 digits (e.g. 9739018888 -> 19739018888)
+    if (cleaned.length === 10) {
+      cleaned = '1' + cleaned;
+    }
+
+    // Egyptian Number: 11 digits starting with 01 (e.g. 01103017683 -> 201103017683)
+    if (cleaned.length === 11 && cleaned.startsWith('01')) {
+      cleaned = '2' + cleaned;
+    }
+
+    return cleaned;
   }
 }

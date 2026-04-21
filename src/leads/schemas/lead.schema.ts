@@ -57,6 +57,18 @@ export class Lead {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   createdBy: Types.ObjectId;
 
+  @Prop({ default: false })
+  isGroup: boolean;
+
+  @Prop()
+  groupJid: string;
+
+  @Prop({ default: 0 })
+  unreadCount: number;
+
+  @Prop({ default: false })
+  isArchived: boolean;
+
   id: string;
   createdAt: Date;
   updatedAt: Date;

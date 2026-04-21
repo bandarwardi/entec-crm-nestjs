@@ -30,6 +30,7 @@ import { FirebaseService } from '../firebase/firebase.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { FieldValue } from 'firebase-admin/firestore';
 import { AiSettings, AiSettingsDocument } from './schemas/ai-settings.schema';
+import { WhatsappTemplate, WhatsappTemplateDocument } from './schemas/whatsapp-template.schema';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 @Injectable()
@@ -47,6 +48,7 @@ export class WhatsappService implements OnModuleInit {
     @InjectModel(WhatsappSession.name) private sessionModel: Model<WhatsappSessionDocument>,
     @InjectModel(Lead.name) private leadModel: Model<LeadDocument>,
     @InjectModel(AiSettings.name) private aiSettingsModel: Model<AiSettingsDocument>,
+    @InjectModel(WhatsappTemplate.name) private templateModel: Model<WhatsappTemplateDocument>,
     private readonly usersService: UsersService,
     private readonly firebaseService: FirebaseService,
     private readonly notificationsService: NotificationsService,
@@ -423,6 +425,39 @@ export class WhatsappService implements OnModuleInit {
         }
       });
 
+      sock.ev.on('messages.update', async (updates) => {
+        for (const update of updates) {
+          if (update.update.status) {
+            // Mapping Baileys status to our status
+            // 3 = Delivered, 4 = Read
+            let status = 'sent';
+            if (update.update.status === 3) status = 'delivered';
+            else if (update.update.status === 4) status = 'read';
+            
+            if (status !== 'sent') {
+              this.logger.log(`[Status Update] Message ${update.key.id} status changed to ${status}`);
+              
+              // Update MongoDB
+              await this.messageModel.findOneAndUpdate(
+                { waMessageId: update.key.id },
+                { status }
+              ).exec();
+
+              // Update Firestore
+              const db = this.firebaseService.getFirestore();
+              const messagesRef = db.collection('whatsappChannels').doc(channelId).collection('messages');
+              const snapshot = await messagesRef.where('waMessageId', '==', update.key.id).get();
+              
+              const batch = db.batch();
+              snapshot.docs.forEach(doc => {
+                batch.update(doc.ref, { status, updatedAt: FieldValue.serverTimestamp() });
+              });
+              await batch.commit();
+            }
+          }
+        }
+      });
+
       return sock;
     } catch (error) {
       this.logger.error(`Failed to init session ${sessionId}: ${error.message}`);
@@ -439,7 +474,9 @@ export class WhatsappService implements OnModuleInit {
       }
 
       const fromJid = msg.key.remoteJid;
-      if (!fromJid || fromJid === 'status@broadcast' || fromJid.endsWith('@g.us')) return;
+      if (!fromJid || fromJid === 'status@broadcast') return;
+
+      const isGroup = fromJid.endsWith('@g.us');
 
       // Check if message already exists (to prevent duplicates from system's own sends)
       const existingMsg = await this.messageModel.findOne({ waMessageId: msg.key.id }).exec();
@@ -470,6 +507,22 @@ export class WhatsappService implements OnModuleInit {
                          (msg.message?.videoMessage ? 'video' : 
                          (msg.message?.audioMessage ? 'audio' : 
                          (msg.message?.documentMessage ? 'document' : 'text'))));
+
+      // Extract Quote Info
+      const contextInfo = msg.message?.extendedTextMessage?.contextInfo || 
+                          msg.message?.imageMessage?.contextInfo || 
+                          msg.message?.videoMessage?.contextInfo || 
+                          msg.message?.audioMessage?.contextInfo || 
+                          msg.message?.documentMessage?.contextInfo;
+
+      let quotedMessageId = contextInfo?.stanzaId;
+      let quotedContent = '';
+      let quotedMessageType = '';
+      if (contextInfo?.quotedMessage) {
+        const qm = contextInfo.quotedMessage;
+        quotedContent = qm.conversation || qm.extendedTextMessage?.text || qm.imageMessage?.caption || qm.videoMessage?.caption || (qm.imageMessage ? '[Image]' : qm.videoMessage ? '[Video]' : qm.audioMessage ? '[Audio]' : qm.stickerMessage ? '[Sticker]' : qm.documentMessage ? '[Document]' : '');
+        quotedMessageType = qm.imageMessage ? 'image' : (qm.videoMessage ? 'video' : (qm.audioMessage ? 'audio' : (qm.stickerMessage ? 'sticker' : (qm.documentMessage ? 'document' : 'text'))));
+      }
 
       let mediaUrl: string | null = null;
       if (messageType !== 'text') {
@@ -523,6 +576,11 @@ export class WhatsappService implements OnModuleInit {
         // Background update for Profile Picture and Last Message
         const updateData: any = { lastMessageAt: new Date() };
         
+        if (isGroup && !lead.isGroup) {
+          updateData.isGroup = true;
+          updateData.groupJid = fromJid;
+        }
+
         // Only fetch profile pic if not already set or every once in a while
         if (!lead.profilePicUrl) {
           try {
@@ -531,16 +589,42 @@ export class WhatsappService implements OnModuleInit {
           } catch (e) {}
         }
 
-        await this.leadModel.findByIdAndUpdate(lead._id, updateData);
-      } else if (!unresolved && phoneNumber) {
-        // Auto-create lead for new incoming contacts
+        if (direction === 'inbound') {
+          updateData.$inc = { unreadCount: 1 };
+        }
+
+        lead = await this.leadModel.findByIdAndUpdate(lead._id, updateData, { new: true });
+        
+        // Update Firestore lead data
         try {
-          this.logger.log(`[Incoming] No lead found for phone ${phoneNumber}. Auto-creating...`);
+          const db = this.firebaseService.getFirestore();
+          await db.collection('leads').doc(lead._id.toString()).set({
+            unreadCount: lead.unreadCount,
+            lastMessageAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp()
+          }, { merge: true });
+        } catch (e) {}
+      } else if (!unresolved && (phoneNumber || isGroup)) {
+        // Auto-create lead for new incoming contacts or groups
+        try {
+          this.logger.log(`[Incoming] No lead found for ${isGroup ? 'group' : 'phone'} ${isGroup ? fromJid : phoneNumber}. Auto-creating...`);
           const channel = await this.channelModel.findById(channelId);
           
+          let leadName = msg.pushName || phoneNumber;
+          if (isGroup) {
+            try {
+              const metadata = await sock.groupMetadata(fromJid);
+              leadName = metadata.subject;
+            } catch (e) {
+              leadName = 'WhatsApp Group';
+            }
+          }
+
           lead = new this.leadModel({
-            name: msg.pushName || phoneNumber, 
-            phone: phoneNumber,
+            name: leadName, 
+            phone: isGroup ? fromJid : phoneNumber,
+            isGroup,
+            groupJid: isGroup ? fromJid : undefined,
             status: LeadStatus.NEW,
             lastMessageAt: new Date(),
             createdBy: channel?.createdBy || undefined
@@ -553,7 +637,7 @@ export class WhatsappService implements OnModuleInit {
           } catch (e) {}
 
           await lead.save();
-          this.logger.log(`[Incoming] Auto-created lead for ${phoneNumber}: ${lead.name}`);
+          this.logger.log(`[Incoming] Auto-created lead for ${lead.phone}: ${lead.name}`);
         } catch (err) {
           this.logger.error(`[Incoming] Failed to auto-create lead: ${err.message}`);
         }
@@ -574,7 +658,10 @@ export class WhatsappService implements OnModuleInit {
         timestamp,
         status: 'delivered',
         unresolvedLid: unresolved,
-        lidJid: fromJid.endsWith('@lid') ? fromJid : undefined
+        lidJid: fromJid.endsWith('@lid') ? fromJid : undefined,
+        quotedMessageId,
+        quotedContent,
+        quotedMessageType
       });
 
       await newMessage.save();
@@ -584,7 +671,7 @@ export class WhatsappService implements OnModuleInit {
       const messageRef = db.collection('whatsappChannels').doc(channelId).collection('messages').doc();
       
       await messageRef.set({
-        externalNumber: phoneNumber,
+        externalNumber: isGroup ? fromJid : phoneNumber,
         leadId: lead?._id?.toString() || null,
         direction,
         content: content || '',
@@ -594,8 +681,19 @@ export class WhatsappService implements OnModuleInit {
         waMessageId: msg.key.id,
         timestamp: FieldValue.serverTimestamp(),
         unresolvedLid: !!unresolved,
-        lidJid: (fromJid.endsWith('@lid') ? fromJid : null) || null
+        lidJid: (fromJid.endsWith('@lid') ? fromJid : null) || null,
+        isGroup,
+        groupJid: isGroup ? fromJid : null,
+        senderJid: isGroup ? msg.key.participant : null,
+        senderName: isGroup ? (msg.pushName || 'Participant') : null,
+        quotedMessageId: quotedMessageId || null,
+        quotedContent: quotedContent || null,
+        quotedMessageType: quotedMessageType || null
       });
+
+      // Update lead unread count in Firestore specifically for the whatsappChannels list if we want it real-time there
+      // Actually, we usually listen to 'leads' collection or have the count in the channel message metadata.
+      // Let's stick to the Lead model update.
 
       this.logger.log(`[Incoming] Message saved to Firestore: whatsappChannels/${channelId}/messages/${messageRef.id}`);
 
@@ -745,7 +843,7 @@ export class WhatsappService implements OnModuleInit {
     return channel;
   }
 
-  async sendMessage(channelId: string, leadId: string, phoneNumber: string, content: string, agentId: string, agentName: string = 'System', messageType: string = 'text', mediaUrl?: string) {
+  async sendMessage(channelId: string, leadId: string, phoneNumber: string, content: string, agentId: string, agentName: string = 'System', messageType: string = 'text', mediaUrl?: string, quotedMessageId?: string, quotedContent?: string) {
     const channel = await this.channelModel.findById(channelId);
     if (!channel) throw new NotFoundException('Channel not found');
 
@@ -801,7 +899,7 @@ export class WhatsappService implements OnModuleInit {
       const db = this.firebaseService.getFirestore();
       const messageRef = db.collection('whatsappChannels').doc(channelId).collection('messages').doc();
       await messageRef.set({
-        externalNumber: lead.phone.replace(/\D/g, ''),
+        externalNumber: lead.phone,
         leadId: lead._id.toString(),
         direction: 'outbound',
         content: dbContent || '',
@@ -812,6 +910,10 @@ export class WhatsappService implements OnModuleInit {
         sentByAgentName: agentName || 'System',
         waMessageId: tempId,
         timestamp: FieldValue.serverTimestamp(),
+        quotedMessageId: quotedMessageId || null,
+        quotedContent: quotedContent || null,
+        isGroup: !!lead.isGroup,
+        groupJid: lead.isGroup ? lead.phone : null
       });
 
       // 3. Add to queue for actual sending
@@ -824,7 +926,8 @@ export class WhatsappService implements OnModuleInit {
         agentName,
         messageType,
         mediaUrl,
-        tempMessageId: tempId // Pass this to update later
+        tempMessageId: tempId, // Pass this to update later
+        quotedMessageId
       }, {
         jobId,
         attempts: 1,
@@ -839,7 +942,7 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
-  async sendDirectMessage(channelId: string, leadId: string, content: string, agentId: string, agentName: string = 'System', messageType: string = 'text', mediaUrl?: string, tempMessageId?: string) {
+  async sendDirectMessage(channelId: string, leadId: string, content: string, agentId: string, agentName: string = 'System', messageType: string = 'text', mediaUrl?: string, tempMessageId?: string, quotedMessageId?: string) {
     this.logger.log(`sendDirectMessage: Attempting to send ${messageType} to lead ${leadId} via channel ${channelId}`);
     
     const channel = await this.channelModel.findById(channelId);
@@ -870,36 +973,51 @@ export class WhatsappService implements OnModuleInit {
 
     // Clean phone number: remove any non-digit except possibly a + at start
     const cleanPhone = lead.phone.replace(/\D/g, '');
-    const jid = `${cleanPhone}@s.whatsapp.net`;
+    const isGroup = lead.isGroup || lead.phone.endsWith('@g.us');
+    const jid = isGroup ? lead.phone : `${cleanPhone}@s.whatsapp.net`;
 
     const result = await (async () => {
+      const options: any = {};
+      if (quotedMessageId) {
+        // Find the quoted message to get its key
+        const quotedMsg = await this.messageModel.findOne({ waMessageId: quotedMessageId }).exec();
+        if (quotedMsg) {
+          options.quoted = {
+            key: {
+              remoteJid: jid,
+              fromMe: quotedMsg.direction === 'outbound',
+              id: quotedMessageId,
+              participant: lead.isGroup ? (quotedMsg.senderJid || undefined) : undefined
+            },
+            message: { [quotedMsg.messageType === 'text' ? 'conversation' : quotedMsg.messageType + 'Message']: quotedMsg.content }
+          };
+        }
+      }
+
       if (messageType === 'sticker' && mediaUrl) {
         return await sock.sendMessage(jid, { 
           sticker: { url: mediaUrl },
           mimetype: 'image/webp'
-        }, {
-          quoted: undefined,
-          ephemeralExpiration: undefined,
-          // Some versions of Baileys/WA need these in contextInfo or as separate fields
-          // but let's stick to basics that work for most
-        });
+        }, options);
       } else if (messageType === 'audio' && mediaUrl) {
         return await sock.sendMessage(jid, { 
           audio: { url: mediaUrl }, 
           mimetype: 'audio/mpeg', // Use standard audio mimetype
           ptt: false 
-        });
+        }, options);
       } else if (messageType === 'document' && mediaUrl) {
         const fileName = content || 'Document';
         return await sock.sendMessage(jid, { 
           document: { url: mediaUrl }, 
           fileName: fileName.includes('.') ? fileName : `${fileName}.pdf`,
           mimetype: 'application/pdf' // Default to PDF if not specified, WA will handle others
-        });
+        }, options);
       } else if (messageType === 'image' && mediaUrl) {
-        return await sock.sendMessage(jid, { image: { url: mediaUrl }, caption: content });
+        return await sock.sendMessage(jid, { image: { url: mediaUrl }, caption: content }, options);
+      } else if (messageType === 'video' && mediaUrl) {
+        return await sock.sendMessage(jid, { video: { url: mediaUrl }, caption: content }, options);
       } else {
-        return await sock.sendMessage(jid, { text: content });
+        return await sock.sendMessage(jid, { text: content }, options);
       }
     })();
 
@@ -1113,5 +1231,65 @@ export class WhatsappService implements OnModuleInit {
       this.logger.error(`AI Suggestion Error: ${error.message}`);
       return { suggestion: null };
     }
+  }
+
+  async markAsRead(leadId: string) {
+    await this.leadModel.findByIdAndUpdate(leadId, { unreadCount: 0 });
+    
+    // Clear in Firestore
+    try {
+      const db = this.firebaseService.getFirestore();
+      await db.collection('leads').doc(leadId).set({
+        unreadCount: 0,
+        updatedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+    } catch (e) {}
+    
+    return { success: true };
+  }
+
+  async getTemplates() {
+    let templates = await this.templateModel.find({ isActive: true }).sort({ createdAt: -1 }).exec();
+    
+    // Seed default templates if empty
+    if (templates.length === 0) {
+      const defaults = [
+        { title: 'الترحيب', content: 'مرحباً بك في EN TEC، كيف يمكننا مساعدتك اليوم؟' },
+        { title: 'العنوان', content: 'عنواننا هو: مدينة الرياض، حي الملز، طريق صلاح الدين.' },
+        { title: 'ساعات العمل', content: 'ساعات العمل الرسمية من الأحد إلى الخميس، من الساعة 9 صباحاً حتى 5 مساءً.' }
+      ];
+      await this.templateModel.insertMany(defaults);
+      templates = await this.templateModel.find({ isActive: true }).exec();
+    }
+    
+    return templates;
+  }
+
+  async createTemplate(data: any, userId: string) {
+    const template = new this.templateModel({ ...data, createdBy: new Types.ObjectId(userId) });
+    return await template.save();
+  }
+
+  async deleteTemplate(id: string) {
+    return await this.templateModel.findByIdAndDelete(id).exec();
+  }
+
+  async toggleArchive(leadId: string) {
+    const lead = await this.leadModel.findById(leadId);
+    if (!lead) throw new NotFoundException('Lead not found');
+    
+    const newState = !lead.isArchived;
+    await this.leadModel.findByIdAndUpdate(leadId, { isArchived: newState });
+    
+    // Sync to Firestore
+    try {
+      const db = this.firebaseService.getFirestore();
+      await db.collection('leads').doc(leadId).set({
+        isArchived: newState,
+        updatedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+    } catch (e) {}
+    
+    return { success: true, isArchived: newState };
   }
 }

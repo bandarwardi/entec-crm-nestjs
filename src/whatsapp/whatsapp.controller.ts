@@ -55,6 +55,8 @@ export class WhatsappController {
     @Body('content') content: string,
     @Body('messageType') messageType: string,
     @Body('mediaUrl') mediaUrl: string,
+    @Body('quotedMessageId') quotedMessageId: string,
+    @Body('quotedContent') quotedContent: string,
     @Request() req: any
   ) {
     return this.whatsappService.sendMessage(
@@ -65,7 +67,9 @@ export class WhatsappController {
       req.user.userId, 
       req.user.name, 
       messageType, 
-      mediaUrl
+      mediaUrl,
+      quotedMessageId,
+      quotedContent
     );
   }
 
@@ -101,5 +105,30 @@ export class WhatsappController {
     @Body('phoneNumber') phoneNumber: string
   ) {
     return this.whatsappService.generateAiSuggestion(channelId, phoneNumber);
+  }
+  
+  @Post('leads/:id/mark-as-read')
+  async markAsRead(@Param('id') id: string) {
+    return this.whatsappService.markAsRead(id);
+  }
+
+  @Get('templates')
+  getTemplates() {
+    return this.whatsappService.getTemplates();
+  }
+
+  @Post('templates')
+  createTemplate(@Body() data: any, @Request() req: any) {
+    return this.whatsappService.createTemplate(data, req.user.userId);
+  }
+
+  @Delete('templates/:id')
+  deleteTemplate(@Param('id') id: string) {
+    return this.whatsappService.deleteTemplate(id);
+  }
+
+  @Post('leads/:id/toggle-archive')
+  async toggleArchive(@Param('id') id: string) {
+    return this.whatsappService.toggleArchive(id);
   }
 }

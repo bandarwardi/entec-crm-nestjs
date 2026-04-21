@@ -40,6 +40,24 @@ export class WhatsappMessage {
 
   @Prop()
   lidJid: string;
+
+  @Prop()
+  groupJid: string;
+
+  @Prop()
+  senderJid: string;
+
+  @Prop()
+  senderName: string;
+
+  @Prop()
+  quotedMessageId: string;
+
+  @Prop()
+  quotedContent: string;
+
+  @Prop()
+  quotedMessageType: string;
 }
 
 export const WhatsappMessageSchema = SchemaFactory.createForClass(WhatsappMessage);

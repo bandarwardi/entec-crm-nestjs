@@ -369,14 +369,16 @@ export class SalesService {
 
   async importOrdersFromExcel(fileBuffer: Buffer) {
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(fileBuffer);
+    await workbook.xlsx.load(fileBuffer as any);
     const worksheet = workbook.getWorksheet(1);
     
-    const results = {
+    const results: { success: number; failed: number; errors: string[] } = {
       success: 0,
       failed: 0,
       errors: []
     };
+
+    if (!worksheet) return results;
 
     const agents = await this.userModel.find({ role: { $in: ['admin', 'agent'] } }).exec();
 

@@ -18,6 +18,26 @@ export class SalesController {
     private readonly uploadProxy: UploadProxyService,
   ) {}
 
+  @Get('export/excel')
+  async exportExcel(@Res() res) {
+    console.log('[SalesController] Exporting Excel...');
+    const buffer = await this.salesService.exportOrdersToExcel();
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename=Sales-Export.xlsx',
+      'Content-Length': (buffer as any).length,
+    });
+    res.end(buffer);
+  }
+
+  @Post('import/excel')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  async importExcel(@UploadedFile() file: Express.Multer.File) {
+    console.log('[SalesController] Importing Excel...');
+    if (!file) throw new BadRequestException('يجب رفع ملف إكسيل');
+    return this.salesService.importOrdersFromExcel(file.buffer);
+  }
+
   // --- Invoice Settings ---
   @Get('invoice-settings')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
@@ -110,21 +130,4 @@ export class SalesController {
     return { url };
   }
 
-  @Get('export/excel')
-  async exportExcel(@Body() body: any, @Param() params: any, @Query() query: any, @Res() res) {
-    const buffer = await this.salesService.exportOrdersToExcel();
-    res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': 'attachment; filename=Sales-Export.xlsx',
-      'Content-Length': (buffer as any).length,
-    });
-    res.end(buffer);
-  }
-
-  @Post('import/excel')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
-  async importExcel(@UploadedFile() file: Express.Multer.File) {
-    if (!file) throw new BadRequestException('يجب رفع ملف إكسيل');
-    return this.salesService.importOrdersFromExcel(file.buffer);
-  }
 }

@@ -1056,21 +1056,43 @@ export class WhatsappService implements OnModuleInit {
 
   async generateAiSuggestion(channelId: string, phoneNumber: string) {
     try {
+      this.logger.debug(`Generating AI suggestion for channel: ${channelId}, phone: ${phoneNumber}`);
+      
       const settings = await this.getAiSettings();
-      if (!settings.isEnabled || !this.genAI) {
+      if (!settings.isEnabled) {
+        this.logger.warn('AI Suggestion: AI is disabled in settings.');
+        return { suggestion: null };
+      }
+      
+      if (!this.genAI) {
+        this.logger.error('AI Suggestion: Gemini API (genAI) is not initialized. Check GEMINI_API_KEY.');
         return { suggestion: null };
       }
 
       // Fetch last 10 messages for context
+      // Note: Use regex to match the last 8 digits for robustness
+      const cleanPhone = phoneNumber.replace(/\D/g, '');
+      const last8 = cleanPhone.slice(-8);
+
+      if (!last8) {
+        this.logger.warn('AI Suggestion: Phone number is invalid or too short.');
+        return { suggestion: null };
+      }
+      
       const messages = await this.messageModel.find({
         channelId: new Types.ObjectId(channelId),
-        externalNumber: phoneNumber
+        externalNumber: { $regex: last8 + '$' }
       })
       .sort({ timestamp: -1 })
       .limit(10)
       .exec();
 
-      if (messages.length === 0) return { suggestion: null };
+      if (messages.length === 0) {
+        this.logger.warn(`AI Suggestion: No messages found in MongoDB for phone ending in ${last8} on channel ${channelId}. Context is empty.`);
+        return { suggestion: null };
+      }
+
+      this.logger.debug(`AI Suggestion: Found ${messages.length} messages for context.`);
 
       // Reverse to get chronological order
       const chatContext = messages.reverse().map(m => 
@@ -1081,9 +1103,11 @@ export class WhatsappService implements OnModuleInit {
       
       const prompt = `التالي هو سياق آخر المحادثات في واتساب:\n${chatContext}\n\nبناءً على المعلومات التالية عن الشركة والمهمة:\n${settings.systemPrompt}\n\nاقترح رداً ذكياً وقصيراً ومهنياً ليقوم الموظف بإرساله للعميل الآن. اقترح النص فقط دون أي تعليقات جانبية.`;
 
+      this.logger.debug('AI Suggestion: Requesting Gemini response...');
       const result = await model.generateContent(prompt);
       const suggestion = result.response.text().trim();
       
+      this.logger.log('AI Suggestion: Generated successfully.');
       return { suggestion };
     } catch (error) {
       this.logger.error(`AI Suggestion Error: ${error.message}`);

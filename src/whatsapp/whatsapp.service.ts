@@ -499,8 +499,8 @@ export class WhatsappService implements OnModuleInit {
         return;
       }
 
-      const fromJid = msg.key.remoteJid;
-      if (!fromJid || fromJid === 'status@broadcast') return;
+    if (!msg?.key?.remoteJid || msg.key.remoteJid === 'status@broadcast') return;
+    const fromJid = msg.key.remoteJid;
 
       const isGroup = fromJid.endsWith('@g.us');
 

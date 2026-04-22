@@ -1473,7 +1473,16 @@ export class WhatsappService implements OnModuleInit {
     if (!sock) throw new Error('WhatsApp session not connected');
 
     const cleanPhone = phoneNumber.replace(/\D/g, '');
-    return await sock.requestPairingCode(cleanPhone);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return await sock.requestPairingCode(cleanPhone);
+    } catch (e: any) {
+      if (e.output?.statusCode === 428) {
+        await new Promise(resolve => setTimeout(resolve, 3500));
+        return await sock.requestPairingCode(cleanPhone);
+      }
+      throw e;
+    }
   }
 
   async createGroup(channelId: string, subject: string, participants: string[]) {
@@ -1575,7 +1584,6 @@ export class WhatsappService implements OnModuleInit {
     this.logger.log(`[History Fetch] Fetching ${count} messages for ${jid} before ${oldestMsg?.timestamp || 'now'}`);
 
     const historyResult: any = await (sock as any).fetchMessageHistory(
-      jid,
       count as any,
       (oldestMsg ? { id: oldestMsg.waMessageId, fromMe: oldestMsg.direction === 'outbound', remoteJid: jid } : undefined) as any,
       (oldestMsg ? Math.floor(oldestMsg.timestamp.getTime() / 1000) : undefined) as any

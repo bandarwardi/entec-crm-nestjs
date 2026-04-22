@@ -36,7 +36,7 @@ export class AutoLogoutService {
         await this.redis.set('global_auto_logout_timestamp', Math.floor(Date.now() / 1000).toString());
         
         const allUsers = await this.usersService.findAll();
-        const onlineUsers = allUsers.filter(u => u.currentStatus === UserStatus.ONLINE || u.currentStatus === UserStatus.ON_BREAK);
+        const onlineUsers = allUsers.filter(u => u.currentStatus === UserStatus.ONLINE || u.currentStatus === UserStatus.BREAK);
         
         for (const user of onlineUsers) {
           await this.usersService.updateStatus(user.id, UserStatus.OFFLINE, undefined, 'طرد تلقائي لانتهاء الدوام');

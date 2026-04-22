@@ -142,7 +142,7 @@ export class AuthService {
     const zones = await this.workSettingsService.getZones();
     const activeZones = zones.filter(z => z.isActive);
 
-    let matchedZone = null;
+    let matchedZone: any = null;
 
     if (activeZones.length === 0) {
        matchedZone = { name: 'أي مكان (لا توجد مناطق محددة)' };

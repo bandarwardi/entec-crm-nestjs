@@ -587,9 +587,15 @@ export class WhatsappService implements OnModuleInit {
         }
       }
 
-      // Advanced Lead Matching: Match by the last 8 digits
+      // Advanced Lead Matching: Match by the full JID if it's a group, otherwise by last 8 digits
       let lead: any = null;
-      if (!unresolved && phoneNumber.length >= 8) {
+      if (isGroup) {
+        lead = await this.leadModel.findOne({ phone: fromJid }).exec();
+        if (!lead) {
+            // Also try to find by a lead that might have isGroup=true but phone as something else
+            lead = await this.leadModel.findOne({ groupJid: fromJid }).exec();
+        }
+      } else if (!unresolved && phoneNumber.length >= 8) {
         const last8 = phoneNumber.slice(-8);
         lead = await this.leadModel.findOne({ 
           phone: { $regex: last8 + '$' } 

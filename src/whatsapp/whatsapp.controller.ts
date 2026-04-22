@@ -38,6 +38,7 @@ export class WhatsappController {
     return this.whatsappService.reconnect(id);
   }
 
+  @Post('channels/:id/request-pairing-code')
   async requestPairingCode(
     @Param('id') id: string,
     @Body('phoneNumber') phoneNumber: string

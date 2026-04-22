@@ -1459,7 +1459,9 @@ export class WhatsappService implements OnModuleInit {
     if (!channel) throw new NotFoundException('Channel not found');
     let sock = this.sessions.get(channel.sessionId);
     if (!sock) {
+      this.logger.log(`Session not found for channel ${channelId}, auto-initializing...`);
       await this.initSession(channel as any);
+      await new Promise(resolve => setTimeout(resolve, 3000));
       sock = this.sessions.get(channel.sessionId);
     }
     if (!sock) throw new Error('WhatsApp session not connected');
@@ -1592,11 +1594,13 @@ export class WhatsappService implements OnModuleInit {
 
     let sock = this.sessions.get(channel.sessionId);
     if (!sock) {
-      this.logger.log(`Session mising for sending message on channel ${channelId}, auto-initializing...`);
+      this.logger.log(`Session not found for channel ${channelId}, auto-initializing...`);
       await this.initSession(channel as any);
+      // Wait for socket to be initialized and establish background connection
+      await new Promise(resolve => setTimeout(resolve, 3000));
       sock = this.sessions.get(channel.sessionId);
     }
-    if (!sock) throw new Error('WhatsApp session not connected (try refreshing)');
+    if (!sock) throw new Error('WhatsApp session initialization failed');
 
     const cleanPhone = lead.phone.replace(/\D/g, '');
     const isGroup = lead.isGroup || lead.phone.endsWith('@g.us');

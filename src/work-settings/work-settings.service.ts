@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { WorkSettings, WorkSettingsDocument } from './schemas/work-settings.schema';
 import { Holiday, HolidayDocument } from './schemas/holiday.schema';
+import { AllowedZone, AllowedZoneDocument } from './schemas/allowed-zone.schema';
 
 @Injectable()
 export class WorkSettingsService implements OnModuleInit {
@@ -11,6 +12,8 @@ export class WorkSettingsService implements OnModuleInit {
     private workSettingsModel: Model<WorkSettingsDocument>,
     @InjectModel(Holiday.name)
     private holidayModel: Model<HolidayDocument>,
+    @InjectModel(AllowedZone.name)
+    private allowedZoneModel: Model<AllowedZoneDocument>,
   ) {}
 
   async onModuleInit() {
@@ -67,5 +70,24 @@ export class WorkSettingsService implements OnModuleInit {
 
   async deleteHoliday(id: string): Promise<void> {
     await this.holidayModel.findByIdAndDelete(id).exec();
+  }
+
+  // --- Security: Allowed Zones ---
+
+  async getZones(): Promise<AllowedZoneDocument[]> {
+    return this.allowedZoneModel.find().exec();
+  }
+
+  async addZone(data: Partial<AllowedZone>): Promise<AllowedZoneDocument> {
+    const zone = new this.allowedZoneModel(data);
+    return zone.save();
+  }
+
+  async updateZone(id: string, data: Partial<AllowedZone>): Promise<AllowedZoneDocument | null> {
+    return this.allowedZoneModel.findByIdAndUpdate(id, data, { new: true }).exec();
+  }
+
+  async deleteZone(id: string): Promise<void> {
+    await this.allowedZoneModel.findByIdAndDelete(id).exec();
   }
 }

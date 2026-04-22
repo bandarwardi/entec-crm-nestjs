@@ -150,4 +150,27 @@ export class UsersController {
     await this.usersService.remove(id);
     return { success: true };
   }
+
+  // --- Security: Device Fingerprints ---
+
+  @Post(':id/devices')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async addAllowedDevice(@Param('id') id: string, @Body('fingerprint') fingerprint: string) {
+    if (!fingerprint) throw new BadRequestException('Fingerprint is required');
+    return this.usersService.addAllowedDevice(id, fingerprint);
+  }
+
+  @Delete(':id/devices/:fingerprint')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async removeAllowedDevice(@Param('id') id: string, @Param('fingerprint') fingerprint: string) {
+    return this.usersService.removeAllowedDevice(id, fingerprint);
+  }
+
+  @Get(':id/devices')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async getAllowedDevices(@Param('id') id: string) {
+    const user = await this.usersService.findOneWithPassword(id);
+    if (!user) throw new NotFoundException('المستخدم غير موجود');
+    return (user as any).allowedDeviceFingerprints || [];
+  }
 }

@@ -41,6 +41,24 @@ export class UsersService {
     ).exec();
   }
 
+  // --- Security: Device Fingerprints ---
+
+  async addAllowedDevice(userId: any, fingerprint: string) {
+    return this.userModel.findByIdAndUpdate(
+      userId,
+      { $addToSet: { allowedDeviceFingerprints: fingerprint } },
+      { new: true }
+    ).exec();
+  }
+
+  async removeAllowedDevice(userId: any, fingerprint: string) {
+    return this.userModel.findByIdAndUpdate(
+      userId,
+      { $pull: { allowedDeviceFingerprints: fingerprint } },
+      { new: true }
+    ).exec();
+  }
+
   async getUserActivities(userId: any, limit: number = 50) {
     return this.activityModel.find({ user: userId })
       .sort({ timestamp: -1 })

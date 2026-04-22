@@ -41,4 +41,30 @@ export class WorkSettingsController {
   async deleteHoliday(@Param('id') id: string): Promise<void> {
     return this.workSettingsService.deleteHoliday(id);
   }
+
+  // --- Allowed Zones ---
+
+  @Get('zones')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async getZones() {
+    return this.workSettingsService.getZones();
+  }
+
+  @Post('zones')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async addZone(@Body() data: any) {
+    return this.workSettingsService.addZone(data);
+  }
+
+  @Put('zones/:id')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async updateZone(@Param('id') id: string, @Body() data: any) {
+    return this.workSettingsService.updateZone(id, data);
+  }
+
+  @Delete('zones/:id')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async deleteZone(@Param('id') id: string): Promise<void> {
+    return this.workSettingsService.deleteZone(id);
+  }
 }

@@ -38,12 +38,12 @@ export class WhatsappController {
     return this.whatsappService.reconnect(id);
   }
 
-  @Post('channels/:id/request-pairing-code')
-  requestPairingCode(
+  async requestPairingCode(
     @Param('id') id: string,
     @Body('phoneNumber') phoneNumber: string
   ) {
-    return this.whatsappService.requestPairingCode(id, phoneNumber);
+    const code = await this.whatsappService.requestPairingCode(id, phoneNumber);
+    return { code };
   }
 
   @Patch('channels/:id/agents')

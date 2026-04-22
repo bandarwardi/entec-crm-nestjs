@@ -112,6 +112,10 @@ export class UsersService {
       .exec();
   }
 
+  async updateAuthData(id: any, updateData: Partial<User>) {
+    return this.userModel.findByIdAndUpdate(id, updateData, { new: true }).exec();
+  }
+
   async remove(id: any): Promise<void> {
     await this.userModel.findByIdAndDelete(id).exec();
   }

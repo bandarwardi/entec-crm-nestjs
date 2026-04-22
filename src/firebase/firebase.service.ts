@@ -43,9 +43,13 @@ export class FirebaseService implements OnModuleInit {
   }
 
   getAuth() {
-    if (!this.firebaseApp) {
-      throw new Error('Firebase Admin SDK is not initialized. Check FIREBASE_SERVICE_ACCOUNT_BASE64.');
-    }
     return admin.auth(this.firebaseApp);
+  }
+
+  getMessaging() {
+    if (!this.firebaseApp) {
+      throw new Error('Firebase Admin SDK is not initialized.');
+    }
+    return admin.messaging(this.firebaseApp);
   }
 }

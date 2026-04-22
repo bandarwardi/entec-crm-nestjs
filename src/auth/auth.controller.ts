@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UnauthorizedException, Get, Param, Put, UseGuards, Ip, Request } from '@nestjs/common';
+import { Controller, Post, Body, UnauthorizedException, Get, Param, Put, UseGuards, Ip, Request, BadRequestException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
@@ -9,6 +9,10 @@ import { Role } from '../users/roles.enum';
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  // ==============================================================
+  //                 NEW MULTI-LAYER MFA LOGIN ENDPOINTS
+  // ==============================================================
+
   @Post('login')
   async login(@Body() body: any, @Ip() ip: string) {
     const user = await this.authService.validateUser(body.email, body.password);
@@ -16,14 +20,63 @@ export class AuthController {
       throw new UnauthorizedException('البريد الإلكتروني أو كلمة المرور غير صحيحة');
     }
 
-    // Bypass 2FA and Login Requests - Allow direct login for everyone as requested
-    return this.authService.login(user);
+    // Call login with fingerprint, ip, and browser
+    return this.authService.login(user, body.deviceFingerprint, ip, body.browserInfo || 'متصفح ويب');
   }
+
+  @Get('challenge-status/:token')
+  async getChallengeStatus(@Param('token') token: string) {
+     if (!token) throw new BadRequestException('Token required');
+     return this.authService.getChallengeStatus(token);
+  }
+
+  @Post('approve-challenge')
+  @UseGuards(JwtAuthGuard)
+  async approveChallenge(@Body() body: { token: string, lat: number, lng: number }) {
+    if (!body.token || body.lat === undefined || body.lng === undefined) {
+      throw new BadRequestException('Missing parameters');
+    }
+    return this.authService.approveChallenge(body.token, body.lat, body.lng);
+  }
+
+  @Post('reject-challenge')
+  @UseGuards(JwtAuthGuard)
+  async rejectChallenge(@Body('token') token: string) {
+    if (!token) throw new BadRequestException('Token required');
+    return this.authService.rejectChallenge(token);
+  }
+
+  @Post('mobile-login')
+  async mobileLogin(@Body() body: any) {
+    const user = await this.authService.validateUser(body.email, body.password);
+    if (!user) {
+      throw new UnauthorizedException('البريد الإلكتروني أو كلمة المرور غير صحيحة');
+    }
+    return this.authService.mobileLogin(user);
+  }
+
+  @Post('register-biometric')
+  @UseGuards(JwtAuthGuard)
+  async registerBiometric(@Request() req: any) {
+    return this.authService.registerBiometric(req.user.userId);
+  }
+
+  @Post('register-fcm')
+  @UseGuards(JwtAuthGuard)
+  async registerFcm(@Body('token') token: string, @Request() req: any) {
+    if (!token) throw new BadRequestException('Token required');
+    return this.authService.registerFcmToken(req.user.userId, token);
+  }
+
+  // ==============================================================
+  //                 EXISTING ENDPOINTS
+  // ==============================================================
 
   @Post('refresh')
   @UseGuards(JwtAuthGuard)
   async refresh(@Body() user: any) {
-    return this.authService.login(user);
+    // Legacy refresh logic
+    return this.authService.mobileLogin(user);
   }
 
   @Post('logout')

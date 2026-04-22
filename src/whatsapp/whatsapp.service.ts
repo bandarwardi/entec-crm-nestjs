@@ -1575,8 +1575,9 @@ export class WhatsappService implements OnModuleInit {
     this.logger.log(`[History Fetch] Fetching ${count} messages for ${jid} before ${oldestMsg?.timestamp || 'now'}`);
 
     const historyResult: any = await (sock as any).fetchMessageHistory(
+      jid,
       count as any,
-      (oldestMsg ? { id: oldestMsg.waMessageId, fromMe: oldestMsg.direction === 'outbound' } : undefined) as any,
+      (oldestMsg ? { id: oldestMsg.waMessageId, fromMe: oldestMsg.direction === 'outbound', remoteJid: jid } : undefined) as any,
       (oldestMsg ? Math.floor(oldestMsg.timestamp.getTime() / 1000) : undefined) as any
     );
 

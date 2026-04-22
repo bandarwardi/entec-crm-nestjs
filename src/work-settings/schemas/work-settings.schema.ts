@@ -25,6 +25,15 @@ export class WorkSettings {
 
   @Prop({ default: 'Africa/Cairo' })
   timezone: string;
+
+  @Prop({ default: false })
+  securityEnabled: boolean;
+
+  @Prop({ type: Number, default: 60 })
+  autoLogoutDelayMinutes: number;
+
+  @Prop({ type: Number, default: 5 })
+  challengeExpiryMinutes: number;
 }
 
 export const WorkSettingsSchema = SchemaFactory.createForClass(WorkSettings);

@@ -28,6 +28,18 @@ export class User {
   @Prop({ type: [String], default: [] })
   trustedDevices: string[];
 
+  @Prop({ type: [String], default: [] })
+  allowedDeviceFingerprints: string[];
+
+  @Prop({ default: false })
+  biometricRegistered: boolean;
+
+  @Prop()
+  fcmToken: string;
+
+  @Prop({ default: false })
+  securityBypass: boolean;
+
   @Prop({ type: Date })
   lastStatusChange: Date;
 

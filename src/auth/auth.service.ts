@@ -202,7 +202,34 @@ export class AuthService {
     return { success: true };
   }
 
-  async mobileLogin(user: any) {
+  async mobileLogin(user: any, deviceFingerprint?: string, ipAddress?: string) {
+    if (deviceFingerprint) {
+      const fullUser: any = await this.usersService.findOneWithPassword(user.id || user._id);
+      const allowedDevices = fullUser.allowedDeviceFingerprints || [];
+      const currentFingerprint = deviceFingerprint.trim().toLowerCase();
+
+      if (!allowedDevices.map(d => d.trim().toLowerCase()).includes(currentFingerprint)) {
+        // Create request for this mobile device if it doesn't exist
+        const existingRequest = await this.loginRequestModel.findOne({ 
+          user: fullUser._id, 
+          deviceFingerprint: currentFingerprint, 
+          status: 'pending' 
+        });
+
+        if (!existingRequest) {
+          const newRequest = new this.loginRequestModel({
+            user: fullUser._id,
+            deviceFingerprint: currentFingerprint,
+            deviceInfo: 'تطبيق الهاتف (Mobile App)',
+            ipAddress,
+            status: 'pending'
+          });
+          await newRequest.save();
+        }
+
+        throw new UnauthorizedException('جهاز الهاتف هذا غير مسجل. تم إرسال طلب اعتماد للإدارة، يرجى المحاولة بعد الموافقة.');
+      }
+    }
     return this.generateAuthData(user); // Grants application a valid token for push and interaction
   }
 

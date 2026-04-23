@@ -54,12 +54,12 @@ export class AuthController {
   }
 
   @Post('mobile-login')
-  async mobileLogin(@Body() body: any) {
+  async mobileLogin(@Body() body: any, @Ip() ip: string) {
     const user = await this.authService.validateUser(body.email, body.password);
     if (!user) {
       throw new UnauthorizedException('البريد الإلكتروني أو كلمة المرور غير صحيحة');
     }
-    return this.authService.mobileLogin(user);
+    return this.authService.mobileLogin(user, body.deviceFingerprint, ip);
   }
 
   @Post('register-biometric')

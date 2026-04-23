@@ -38,7 +38,7 @@ export class AuthService {
     return null;
   }
 
-  async login(user: any, deviceFingerprint: string, ipAddress: string, browserInfo: string) {
+  async login(user: any, deviceFingerprint: string, ipAddress: string, browserInfo: string, latitude?: number, longitude?: number) {
     const settings = await this.workSettingsService.getSettings();
     const isSecurityEnabled = settings.securityEnabled;
 
@@ -54,8 +54,31 @@ export class AuthService {
     const fullUser: any = await this.usersService.findOneWithPassword(user.id || user._id);
     const allowedDevices = fullUser.allowedDeviceFingerprints || [];
 
-    if (!allowedDevices.includes(deviceFingerprint)) {
-      throw new UnauthorizedException('هذا الجهاز غير مصرح له بالدخول. تواصل مع الإدارة.');
+    const currentFingerprint = deviceFingerprint.trim().toLowerCase();
+    if (!allowedDevices.map(d => d.trim().toLowerCase()).includes(currentFingerprint)) {
+      const existingRequest = await this.loginRequestModel.findOne({ 
+        user: fullUser._id, 
+        deviceFingerprint: currentFingerprint, 
+        status: 'pending' 
+      });
+
+      if (!existingRequest) {
+        const newRequest = new this.loginRequestModel({
+          user: fullUser._id,
+          deviceFingerprint: currentFingerprint,
+          deviceInfo: browserInfo,
+          ipAddress,
+          latitude,
+          longitude,
+          status: 'pending'
+        });
+        await newRequest.save();
+      }
+
+      return { 
+        status: 'request_pending', 
+        message: 'جهازك غير مسجل. تم إرسال طلب اعتماد لجهازك إلى الإدارة، يرجى المحاولة لاحقاً بعد الموافقة.' 
+      };
     }
 
     if (!fullUser.biometricRegistered) {
@@ -227,15 +250,35 @@ export class AuthService {
   //                 OLD LOGIN LOGIC (FALLBACK / ADMIN)
   // ==============================================================
 
-  async submitLoginRequest(user: any, data: { lat: number, lng: number, device: string, ip: string }) { return null; }
+  async getAllPending() {
+    return this.loginRequestModel.find({ status: 'pending' })
+      .populate('user', 'id name email role avatar')
+      .sort({ createdAt: -1 })
+      .exec();
+  }
 
-  async findApprovedRequest(userId: string) { return null; }
+  async getAllHistory() {
+    return this.loginRequestModel.find({ status: { $ne: 'pending' } })
+      .populate('user', 'id name email role avatar')
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .exec();
+  }
 
-  async getAllPending() { return []; }
+  async updateRequestStatus(id: string, status: string, trustDevice?: boolean) {
+    const request = await this.loginRequestModel.findById(id);
+    if (!request) throw new BadRequestException('الطلب غير موجود');
 
-  async getAllHistory() { return []; }
+    if (status === 'approved') {
+      // Automatically add fingerprint to user's allowed list
+      await this.usersService.addAllowedDevice(request.user, request.deviceFingerprint);
+    }
 
-  async updateRequestStatus(id: string, status: string, trustDevice?: boolean) { return null; }
+    request.status = status;
+    await request.save();
+
+    return { success: true };
+  }
 
   async logout(userId: any) {
     return this.usersService.updateStatus(userId, UserStatus.OFFLINE);

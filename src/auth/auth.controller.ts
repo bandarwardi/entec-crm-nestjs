@@ -20,8 +20,15 @@ export class AuthController {
       throw new UnauthorizedException('البريد الإلكتروني أو كلمة المرور غير صحيحة');
     }
 
-    // Call login with fingerprint, ip, and browser
-    return this.authService.login(user, body.deviceFingerprint, ip, body.browserInfo || 'متصفح ويب');
+    // Call login with fingerprint, ip, browser, and optional coordinates
+    return this.authService.login(
+      user, 
+      body.deviceFingerprint, 
+      ip, 
+      body.browserInfo || 'متصفح ويب',
+      body.latitude,
+      body.longitude
+    );
   }
 
   @Get('challenge-status/:token')

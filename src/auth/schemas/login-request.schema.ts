@@ -22,6 +22,9 @@ export class LoginRequest {
   status: string;
 
   @Prop()
+  deviceFingerprint: string;
+
+  @Prop()
   deviceInfo: string;
 
   @Prop()

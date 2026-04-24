@@ -13,19 +13,21 @@ export class SessionGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest();
 
-    // 1. Exempt Mobile App & Postman (Development)
+    // 1. Identify Client Type
     const userAgent = request.headers['user-agent'] || '';
-    const isMobile = /Dart|Postman|iPhone|Android|Mobile/i.test(userAgent);
+    const isMobile = /Dart|Postman|iPhone|Android|Mobile|OKHTTP|CFNetwork/i.test(userAgent);
     
+    console.log(`[SessionGuard] Request from: ${userAgent} | isMobile: ${isMobile}`);
+
     if (isMobile) {
-      return true;
+      return true; // Mobile apps bypass desktop presence check
     }
 
     // 2. Try to get userId from JWT (request.user) or fallback to cookie
     const userId = request.user?.userId || request.cookies?.['crm_user'];
     
     if (!userId) {
-       console.log(`[SessionGuard] Access Denied: No userId for ${userAgent}`);
+       console.log(`[SessionGuard] Blocked: No userId found for Browser/Desktop. UA: ${userAgent}`);
        throw new UnauthorizedException('No active desktop session');
     }
 

@@ -15,6 +15,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { SessionGuard } from '../auth/session.guard';
 import { ChatService } from './chat.service';
 import { UploadProxyService } from '../common/upload-proxy.service';
 
@@ -24,7 +25,7 @@ export enum MediaType {
 }
 
 @Controller('chat')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, SessionGuard)
 export class ChatController {
   constructor(
     private readonly chatService: ChatService,

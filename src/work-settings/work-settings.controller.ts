@@ -4,11 +4,12 @@ import { WorkSettings } from './schemas/work-settings.schema';
 import { Holiday } from './schemas/holiday.schema';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
+import { SessionGuard } from '../auth/session.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '../users/roles.enum';
 
 @Controller('work-settings')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, SessionGuard)
 export class WorkSettingsController {
   constructor(private readonly workSettingsService: WorkSettingsService) {}
 

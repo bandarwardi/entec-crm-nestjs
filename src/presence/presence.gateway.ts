@@ -57,10 +57,7 @@ export class PresenceGateway
   }
 
   handleDisconnect(socket: Socket): void {
-    const userId = socket.data?.userId;
-    console.log(`[PresenceGateway] User ${userId} disconnected`);
-    if (userId) {
-      this.presenceService.remove(userId, socket);
-    }
+    console.log(`[PresenceGateway] Socket ${socket.id} disconnected`);
+    this.presenceService.removeBySocket(socket);
   }
 }

@@ -11,10 +11,11 @@ import {
   Query
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { SessionGuard } from '../auth/session.guard';
 import { WhatsappService } from './whatsapp.service';
 
 @Controller('whatsapp')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, SessionGuard)
 export class WhatsappController {
   constructor(private readonly whatsappService: WhatsappService) {}
 

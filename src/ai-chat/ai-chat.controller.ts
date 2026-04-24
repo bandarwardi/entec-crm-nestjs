@@ -1,10 +1,11 @@
 import { Controller, Post, Body, UseGuards, Get, Param, Request, Delete, Put, Query } from '@nestjs/common';
 import { AiChatService } from './ai-chat.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { SessionGuard } from '../auth/session.guard';
 import { SalesScenario } from './schemas/sales-scenario.schema';
 
 @Controller('ai-chat')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, SessionGuard)
 export class AiChatController {
   constructor(private readonly aiChatService: AiChatService) {}
 

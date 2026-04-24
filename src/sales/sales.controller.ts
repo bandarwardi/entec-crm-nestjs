@@ -5,13 +5,14 @@ import { SalesService } from './sales.service';
 import { CreateCustomerDto, UpdateCustomerDto, CreateOrderDto, UpdateOrderDto, QueryOrdersDto, QueryCustomersDto, DashboardQueryDto } from './sales.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
+import { SessionGuard } from '../auth/session.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '../users/roles.enum';
 import { UploadProxyService } from '../common/upload-proxy.service';
 
 @Controller('sales')
-// @UseGuards(JwtAuthGuard, RolesGuard)
-// @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.AGENT)
+@UseGuards(JwtAuthGuard, RolesGuard, SessionGuard)
+@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.AGENT)
 export class SalesController {
   constructor(
     private readonly salesService: SalesService,

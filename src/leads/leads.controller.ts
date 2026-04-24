@@ -3,11 +3,12 @@ import { LeadsService } from './leads.service';
 import { CreateLeadDto, UpdateLeadDto, QueryLeadsDto } from './leads.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
+import { SessionGuard } from '../auth/session.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '../users/roles.enum';
 
 @Controller('leads')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, SessionGuard)
 export class LeadsController {
   constructor(private readonly leadsService: LeadsService) { }
 

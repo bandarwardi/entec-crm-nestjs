@@ -7,9 +7,13 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { LoginRequest, LoginRequestDocument } from './schemas/login-request.schema';
 import { LoginChallenge, LoginChallengeDocument } from './schemas/login-challenge.schema';
+import { DesktopUser, DesktopUserDocument } from './schemas/desktop-user.schema';
 import { UserStatus } from '../users/user-status.enum';
 import { FirebaseService } from '../firebase/firebase.service';
 import * as crypto from 'crypto';
+import { WsTokenStore } from './ws-token.store';
+import { PresenceService } from '../presence/presence.service';
+
 
 @Injectable()
 export class AuthService {
@@ -20,13 +24,48 @@ export class AuthService {
     private workSettingsService: WorkSettingsService,
     private jwtService: JwtService,
     private firebaseService: FirebaseService,
+
+    private readonly wsTokenStore: WsTokenStore,
+    private readonly presenceService: PresenceService,
     @InjectModel(LoginRequest.name) private loginRequestModel: Model<LoginRequestDocument>,
-    @InjectModel(LoginChallenge.name) private loginChallengeModel: Model<LoginChallengeDocument>
+    @InjectModel(LoginChallenge.name) private loginChallengeModel: Model<LoginChallengeDocument>,
+    @InjectModel(DesktopUser.name) private desktopUserModel: Model<DesktopUserDocument>
   ) {}
 
-  // ==============================================================
-  //                 NEW MULTI-LAYER MFA LOGIN LOGIC
-  // ==============================================================
+
+
+  async validateDesktopUser(username: string, pass: string): Promise<any> {
+    const user = await this.desktopUserModel.findOne({ username, isActive: true }).exec();
+    if (user && await bcrypt.compare(pass, user.passwordHash)) {
+      const { passwordHash, ...result } = user.toObject();
+      return result;
+    }
+    return null;
+  }
+
+  // --- Desktop Users Management ---
+  async getAllDesktopUsers() {
+    return this.desktopUserModel.find().select('-passwordHash').exec();
+  }
+
+  async createDesktopUser(data: any) {
+    const passwordHash = await bcrypt.hash(data.password, 10);
+    const user = new this.desktopUserModel({ ...data, passwordHash });
+    return user.save();
+  }
+
+  async updateDesktopUser(id: string, data: any) {
+    if (data.password) {
+      data.passwordHash = await bcrypt.hash(data.password, 10);
+      delete data.password;
+    }
+    return this.desktopUserModel.findByIdAndUpdate(id, data, { new: true }).exec();
+  }
+
+  async deleteDesktopUser(id: string) {
+    return this.desktopUserModel.findByIdAndDelete(id).exec();
+  }
+
 
   async validateUser(email: string, pass: string): Promise<any> {
     const user = await this.usersService.findOneByEmail(email);
@@ -47,14 +86,16 @@ export class AuthService {
       return this.generateAuthData(user);
     }
 
-    if (!deviceFingerprint) {
+    if (!deviceFingerprint && !browserInfo?.includes('Python Desktop Gateway')) {
       throw new BadRequestException('معرف الجهاز مفقود');
     }
+    
+    // Normalize fingerprint
+    const currentFingerprint = (deviceFingerprint || 'desktop-client-gateway').trim().toLowerCase();
 
     const fullUser: any = await this.usersService.findOneWithPassword(user.id || user._id);
     const allowedDevices = fullUser.allowedDeviceFingerprints || [];
 
-    const currentFingerprint = deviceFingerprint.trim().toLowerCase();
     if (!allowedDevices.map(d => d.trim().toLowerCase()).includes(currentFingerprint)) {
       const existingRequest = await this.loginRequestModel.findOne({ 
         user: fullUser._id, 
@@ -137,11 +178,14 @@ export class AuthService {
     }
 
     if (challenge.status === 'approved') {
+      const userId = (challenge.user as any)._id.toString();
+      const wsToken = this.wsTokenStore.issue(userId);
       return { 
         status: 'approved', 
         jwtToken: challenge.jwtToken,
+        wsToken,
         user: {
-          id: (challenge.user as any)._id,
+          id: userId,
           name: (challenge.user as any).name,
           email: (challenge.user as any).email,
           role: (challenge.user as any).role
@@ -247,8 +291,10 @@ export class AuthService {
     const userId = (user.id || user._id).toString();
     const payload = { email: user.email, sub: userId, role: user.role, name: user.name };
     await this.usersService.updateStatus(userId, UserStatus.ONLINE);
+    const wsToken = this.wsTokenStore.issue(userId);
     return {
       access_token: this.jwtService.sign(payload),
+      wsToken,
       user: {
         id: userId,
         name: user.name,
@@ -315,5 +361,9 @@ export class AuthService {
     const user = await this.usersService.findOneWithPassword(userId);
     if (!user || !(user as any).passwordHash) return false;
     return bcrypt.compare(pass, (user as any).passwordHash);
+  }
+
+  isPresenceActive(userId: string): boolean {
+    return this.presenceService.isActive(userId);
   }
 }

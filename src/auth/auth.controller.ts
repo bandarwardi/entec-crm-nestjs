@@ -1,9 +1,11 @@
-import { Controller, Post, Body, UnauthorizedException, Get, Param, Put, UseGuards, Ip, Request, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Body, UnauthorizedException, Get, Param, Put, Delete, UseGuards, Ip, Request, BadRequestException, Res, HttpCode, Query, Headers, Req } from '@nestjs/common';
+import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
 import { Roles } from './roles.decorator';
 import { Role } from '../users/roles.enum';
+import { SkipSession } from './skip-session.decorator';
 
 @Controller('auth')
 export class AuthController {
@@ -13,28 +15,60 @@ export class AuthController {
   //                 NEW MULTI-LAYER MFA LOGIN ENDPOINTS
   // ==============================================================
 
+  @SkipSession()
   @Post('login')
-  async login(@Body() body: any, @Ip() ip: string) {
-    const user = await this.authService.validateUser(body.email, body.password);
+  @HttpCode(200)
+  async login(
+    @Body() body: any,
+    @Req() req: any,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const user = await this.authService.validateUser(body.email || body.username, body.password);
+
     if (!user) {
       throw new UnauthorizedException('البريد الإلكتروني أو كلمة المرور غير صحيحة');
     }
 
-    // Call login with fingerprint, ip, browser, and optional coordinates
-    return this.authService.login(
+    const result = await this.authService.login(
       user, 
       body.deviceFingerprint, 
-      ip, 
+      req.ip || '', 
       body.browserInfo || 'متصفح ويب',
       body.latitude,
       body.longitude
     );
+
+    if ((result as any).user?.id) {
+      res.cookie('crm_user', (result as any).user.id, {
+        httpOnly: true,
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 24 * 60 * 60 * 1000, // 1 day
+      });
+    }
+
+    return result;
   }
 
+  @SkipSession()
   @Get('challenge-status/:token')
-  async getChallengeStatus(@Param('token') token: string) {
+  async getChallengeStatus(
+    @Param('token') token: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
      if (!token) throw new BadRequestException('Token required');
-     return this.authService.getChallengeStatus(token);
+     const result = await this.authService.getChallengeStatus(token);
+
+     if ((result as any).status === 'approved' && (result as any).user?.id) {
+       res.cookie('crm_user', (result as any).user.id, {
+         httpOnly: true,
+         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+         secure: process.env.NODE_ENV === 'production',
+         maxAge: 24 * 60 * 60 * 1000, // 1 day
+       });
+     }
+
+     return result;
   }
 
   @Post('approve-challenge')
@@ -53,6 +87,7 @@ export class AuthController {
     return this.authService.rejectChallenge(token);
   }
 
+  @SkipSession()
   @Post('mobile-login')
   async mobileLogin(@Body() body: any, @Ip() ip: string) {
     const user = await this.authService.validateUser(body.email, body.password);
@@ -118,5 +153,48 @@ export class AuthController {
   async verifyPassword(@Body('password') password: string, @Request() req: any) {
     const isValid = await this.authService.verifyPassword(req.user.userId, password);
     return { isValid };
+  }
+
+  @Get('presence-status')
+  @UseGuards(JwtAuthGuard)
+  async getPresenceStatus(@Request() req: any) {
+    const isActive = this.authService.isPresenceActive(req.user.userId);
+    return { isActive };
+  }
+
+  // --- Desktop Users Management Endpoints ---
+  @Get('desktop-users')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async getDesktopUsers() {
+    return this.authService.getAllDesktopUsers();
+  }
+
+  @Post('desktop-users')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async createDesktopUser(@Body() data: any) {
+    return this.authService.createDesktopUser(data);
+  }
+
+  @Put('desktop-users/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async updateDesktopUser(@Param('id') id: string, @Body() data: any) {
+    return this.authService.updateDesktopUser(id, data);
+  }
+
+  @Delete('desktop-users/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async deleteDesktopUser(@Param('id') id: string) {
+    return this.authService.deleteDesktopUser(id);
+  }
+  @Get('debug-cookies')
+  async debugCookies(@Req() req: any) {
+    return { 
+      cookies: req.cookies,
+      crm_user: req.cookies?.['crm_user']
+    };
   }
 }

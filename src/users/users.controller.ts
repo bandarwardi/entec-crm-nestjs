@@ -4,6 +4,7 @@ import { memoryStorage } from 'multer';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
+import { SessionGuard } from '../auth/session.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from './roles.enum';
 import { PerformanceService } from './performance.service';
@@ -12,7 +13,7 @@ import * as bcrypt from 'bcrypt';
 import { UserStatus, BreakReason } from './user-status.enum';
 
 @Controller('users')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, SessionGuard)
 export class UsersController {
   constructor(
     private readonly usersService: UsersService,

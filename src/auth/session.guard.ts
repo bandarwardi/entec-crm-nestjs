@@ -13,12 +13,12 @@ export class SessionGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest();
 
-    // userId is stored in cookie after login
-    const userId = request.cookies?.['crm_user'];
-    console.log('[SessionGuard] Checking cookie crm_user:', userId);
+    // Try to get userId from JWT (request.user) or fallback to cookie
+    const userId = request.user?.userId || request.cookies?.['crm_user'];
+    console.log('[SessionGuard] Checking userId:', userId);
 
     if (!userId) {
-       console.log('[SessionGuard] No crm_user cookie found');
+       console.log('[SessionGuard] No userId found in JWT or cookie');
        throw new UnauthorizedException('No active desktop session');
     }
 

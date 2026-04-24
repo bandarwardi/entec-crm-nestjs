@@ -29,6 +29,8 @@ export class PresenceService {
 
   isActive(userId: string): boolean {
     const sockets = this.activeConnections.get(userId);
-    return !!sockets && sockets.size > 0;
+    const active = !!sockets && sockets.size > 0;
+    console.log(`[PresenceService] Activity check for ${userId}: ${active} (${sockets?.size || 0} connections)`);
+    return active;
   }
 }

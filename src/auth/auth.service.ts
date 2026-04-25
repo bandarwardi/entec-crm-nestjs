@@ -96,7 +96,13 @@ export class AuthService {
     const fullUser: any = await this.usersService.findOneWithPassword(user.id || user._id);
     const allowedDevices = fullUser.allowedDeviceFingerprints || [];
 
-    if (!allowedDevices.map(d => d.trim().toLowerCase()).includes(currentFingerprint)) {
+    this.logger.debug(`[Login] Checking fingerprint: "${currentFingerprint}"`);
+    this.logger.debug(`[Login] Allowed devices: ${JSON.stringify(allowedDevices)}`);
+
+    const isAllowed = allowedDevices.some(d => d.trim().toLowerCase() === currentFingerprint);
+
+    if (!isAllowed) {
+      this.logger.warn(`[Login] Fingerprint NOT matched. Returning request_pending.`);
       const existingRequest = await this.loginRequestModel.findOne({ 
         user: fullUser._id, 
         deviceFingerprint: currentFingerprint, 

@@ -51,6 +51,13 @@ export class AuthController {
   }
 
   @SkipSession()
+  @Post('desktop/login')
+  @HttpCode(200)
+  async desktopLogin(@Body() body: any) {
+    return this.authService.desktopLogin(body.username, body.password);
+  }
+
+  @SkipSession()
   @Get('challenge-status/:token')
   async getChallengeStatus(
     @Param('token') token: string,

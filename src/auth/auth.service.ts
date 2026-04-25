@@ -38,9 +38,28 @@ export class AuthService {
     const user = await this.desktopUserModel.findOne({ username, isActive: true }).exec();
     if (user && await bcrypt.compare(pass, user.passwordHash)) {
       const { passwordHash, ...result } = user.toObject();
-      return result;
+      return { ...result, _id: user._id };
     }
     return null;
+  }
+
+  async desktopLogin(username: string, pass: string) {
+    const user = await this.validateDesktopUser(username, pass);
+    if (!user) {
+      throw new UnauthorizedException('اسم المستخدم أو كلمة المرور غير صحيحة');
+    }
+
+    const wsToken = this.wsTokenStore.issue(user._id.toString());
+    
+    return {
+      success: true,
+      wsToken,
+      user: {
+        id: user._id,
+        name: user.name,
+        username: user.username
+      }
+    };
   }
 
   // --- Desktop Users Management ---

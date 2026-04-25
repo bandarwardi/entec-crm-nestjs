@@ -49,7 +49,9 @@ export class AuthService {
       throw new UnauthorizedException('اسم المستخدم أو كلمة المرور غير صحيحة');
     }
 
-    const wsToken = this.wsTokenStore.issue(user._id.toString());
+    // Issue token for the linked CRM user if available, otherwise for the desktop user itself
+    const targetUserId = user.linkedUser || user._id.toString();
+    const wsToken = this.wsTokenStore.issue(targetUserId);
     
     return {
       success: true,
@@ -57,7 +59,8 @@ export class AuthService {
       user: {
         id: user._id,
         name: user.name,
-        username: user.username
+        username: user.username,
+        linkedUser: user.linkedUser
       }
     };
   }
@@ -110,18 +113,19 @@ export class AuthService {
     }
     
     // Normalize fingerprint
-    const currentFingerprint = (deviceFingerprint || 'desktop-client-gateway').trim().toLowerCase();
+    const currentFingerprint = (deviceFingerprint || 'unknown-device').trim().toLowerCase();
 
     const fullUser: any = await this.usersService.findOneWithPassword(user.id || user._id);
-    const allowedDevices = fullUser.allowedDeviceFingerprints || [];
+    const allowedDevices = (fullUser.allowedDeviceFingerprints || []).map(d => d.trim().toLowerCase());
 
-    this.logger.debug(`[Login] Checking fingerprint: "${currentFingerprint}"`);
-    this.logger.debug(`[Login] Allowed devices: ${JSON.stringify(allowedDevices)}`);
+    this.logger.log(`[Auth] User ${fullUser.email} attempting login.`);
+    this.logger.log(`[Auth] Incoming fingerprint: [${currentFingerprint}]`);
+    this.logger.log(`[Auth] Allowed fingerprints for this user: ${JSON.stringify(allowedDevices)}`);
 
-    const isAllowed = allowedDevices.some(d => d.trim().toLowerCase() === currentFingerprint);
+    const isAllowed = allowedDevices.includes(currentFingerprint);
 
     if (!isAllowed) {
-      this.logger.warn(`[Login] Fingerprint NOT matched. Returning request_pending.`);
+      this.logger.warn(`[Auth] Fingerprint NOT matched. Device is not in allowed list.`);
       const existingRequest = await this.loginRequestModel.findOne({ 
         user: fullUser._id, 
         deviceFingerprint: currentFingerprint, 
@@ -320,6 +324,10 @@ export class AuthService {
 
   private async generateAuthData(user: any) {
     const userId = (user.id || user._id).toString();
+    
+    // Start grace period in PresenceService
+    this.presenceService.recordLogin(userId);
+
     const payload = { email: user.email, sub: userId, role: user.role, name: user.name };
     await this.usersService.updateStatus(userId, UserStatus.ONLINE);
     const wsToken = this.wsTokenStore.issue(userId);

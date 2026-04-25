@@ -7,6 +7,12 @@ export class PresenceService {
   private activeConnections = new Map<string, Set<Socket>>();
   // socketId → userId (Reverse mapping for reliable cleanup)
   private socketToUser = new Map<string, string>();
+  // userId → timestamp (Server-side grace period)
+  private lastLoginMap = new Map<string, number>();
+
+  recordLogin(userId: string): void {
+    this.lastLoginMap.set(userId, Date.now());
+  }
 
   register(userId: string, socket: Socket): void {
     console.log(`[PresenceService] Registering user: ${userId} (socket: ${socket.id})`);
@@ -43,11 +49,18 @@ export class PresenceService {
 
   isActive(userId: string): boolean {
     const sockets = this.activeConnections.get(userId);
-    const active = !!sockets && sockets.size > 0;
+    let active = !!sockets && sockets.size > 0;
+    
+    // Server-side grace period: If not active via WS, check if they just logged in (< 15s ago)
+    if (!active) {
+      const lastLogin = this.lastLoginMap.get(userId);
+      if (lastLogin && (Date.now() - lastLogin < 15000)) {
+        console.log(`[PresenceService] User ${userId} is within server-side grace period. Treating as active.`);
+        active = true;
+      }
+    }
     
     console.log(`[PresenceGuard] Check userId: ${userId} | Active: ${active}`);
-    console.log(`[PresenceGuard] All Active IDs: ${Array.from(this.activeConnections.keys()).join(', ')}`);
-    
     return active;
   }
 }

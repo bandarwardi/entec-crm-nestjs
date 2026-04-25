@@ -14,6 +14,9 @@ export class DesktopUser {
   @Prop({ required: true })
   passwordHash: string;
 
+  @Prop({ type: String, ref: 'User', required: false })
+  linkedUser: string;
+
   @Prop({ default: true })
   isActive: boolean;
 }

@@ -53,15 +53,19 @@ export class AuthService {
     const targetUserId = user.linkedUser || user._id.toString();
     const wsToken = this.wsTokenStore.issue(targetUserId);
     
+    // Also generate a real JWT for the linked CRM user so the browser can log in
+    const linkedCRMUser = await this.usersService.findOne(targetUserId);
+    if (!linkedCRMUser) {
+      throw new UnauthorizedException('الموظف المرتبط بحساب هذا الجهاز غير موجود');
+    }
+    
+    const authData = await this.generateAuthData(linkedCRMUser);
+
     return {
-      success: true,
+      status: 'ok',
       wsToken,
-      user: {
-        id: user._id,
-        name: user.name,
-        username: user.username,
-        linkedUser: user.linkedUser
-      }
+      access_token: authData.access_token,
+      user: authData.user
     };
   }
 

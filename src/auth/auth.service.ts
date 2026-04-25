@@ -122,6 +122,11 @@ export class AuthService {
       };
     }
 
+    // --- TEMPORARY BYPASS: Mobile App Challenge ---
+    // (Bypassed until app store developer accounts are ready)
+    return this.generateAuthData(fullUser);
+
+    /* 
     if (!fullUser.biometricRegistered) {
       throw new UnauthorizedException('يرجى تسجيل بصمتك عبر تطبيق الهاتف أولاً.');
     }
@@ -164,6 +169,7 @@ export class AuthService {
       expiresAt,
       message: 'بانتظار التأكيد من تطبيق الهاتف' 
     };
+    */
   }
 
   async getChallengeStatus(challengeToken: string) {

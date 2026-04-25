@@ -382,8 +382,10 @@ export class AuthService {
     if (!request) throw new BadRequestException('الطلب غير موجود');
 
     if (status === 'approved') {
-      // Automatically add fingerprint to user's allowed list
-      await this.usersService.addAllowedDevice(request.user, request.deviceFingerprint);
+      // Ensure we use the raw ID even if populated
+      const userId = (request.user as any)._id || request.user;
+      await this.usersService.addAllowedDevice(userId.toString(), request.deviceFingerprint);
+      this.logger.log(`[Auth] Fingerprint ${request.deviceFingerprint} added to user ${userId} allowed list.`);
     }
 
     request.status = status;

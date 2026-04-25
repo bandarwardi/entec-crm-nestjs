@@ -54,7 +54,7 @@ export class AuthService {
     const wsToken = this.wsTokenStore.issue(targetUserId);
     
     // If there is a linked CRM user, generate a real JWT for them
-    let authData = null;
+    let authData: any = null;
     if (user.linkedUser) {
       const linkedCRMUser = await this.usersService.findOne(user.linkedUser);
       if (linkedCRMUser) {
@@ -65,8 +65,8 @@ export class AuthService {
     return {
       status: 'ok',
       wsToken,
-      access_token: authData?.access_token || 'no-link-session',
-      user: authData?.user || {
+      access_token: authData ? authData.access_token : 'no-link-session',
+      user: authData ? authData.user : {
         id: user._id,
         name: user.name,
         username: user.username,

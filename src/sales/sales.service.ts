@@ -420,7 +420,7 @@ export class SalesService {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(fileBuffer as any);
     const worksheet = workbook.getWorksheet(1);
-    
+
     const results: { success: number; failed: number; errors: string[] } = {
       success: 0,
       failed: 0,
@@ -431,102 +431,132 @@ export class SalesService {
 
     const agents = await this.userModel.find({ role: { $in: ['admin', 'agent'] } }).exec();
 
-    // Process rows
-    for (let i = 2; i <= worksheet.rowCount; i++) {
+    // Mapping helpers
+    const mapType = (val: string): string => {
+      if (!val) return 'new';
+      const v = val.toLowerCase();
+      if (v.includes('تجديد')) return 'renewal';
+      if (v.includes('توصية') || v.includes('referral')) return 'referral';
+      return 'new';
+    };
+
+    const parseDate = (val: any): Date => {
+      if (!val) return new Date();
+      if (val instanceof Date) return val;
+      if (typeof val === 'number') {
+        // Excel serial date
+        return new Date(Math.round((val - 25569) * 86400 * 1000));
+      }
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? new Date() : d;
+    };
+
+    let lastValidCustomer: any = null;
+    let lastOrder: any = null;
+    const companyAgent = agents.find(a => a.name?.toLowerCase() === 'company');
+
+    // Process rows - Start from 3 because of double header
+    for (let i = 3; i <= worksheet.rowCount; i++) {
       const row = worksheet.getRow(i);
-      if (!row.getCell(2).value) continue; // Skip if no customer name
+      const rowId = row.getCell(1).value?.toString()?.trim();
+      const customerName = row.getCell(2).value?.toString()?.trim();
+      
+      if (!customerName) continue;
 
       try {
-        const customerName = row.getCell(2).value?.toString();
-        const customerPhone = row.getCell(3).value?.toString()?.replace(/\D/g, '');
+        const mac = row.getCell(19).value?.toString();
+        const key = row.getCell(20).value?.toString();
+        const dName = row.getCell(21).value?.toString();
+        const device = { 
+          macAddress: mac || '', 
+          deviceKey: key || '', 
+          deviceName: dName || '',
+          username: customerName 
+        };
+
+        // If no ID in Column 1, it's an additional device for the last order
+        if (!rowId && lastOrder) {
+          if (mac || key) {
+            lastOrder.devices.push(device);
+            await lastOrder.save();
+            results.success++;
+          }
+          continue;
+        }
+
+        // Otherwise, it's a new order
+        let customerPhone = row.getCell(3).value?.toString()?.replace(/\D/g, '');
         const customerEmail = row.getCell(4).value?.toString();
         const customerAddress = row.getCell(5).value?.toString();
-        const customerState = row.getCell(6).value?.toString();
-        const customerCountry = row.getCell(7).value?.toString();
-        const customerLat = Number(row.getCell(8).value) || null;
-        const customerLng = Number(row.getCell(9).value) || null;
+        const customerCountry = row.getCell(6).value?.toString();
+        const customerState = row.getCell(7).value?.toString();
 
-        const subDateStr = row.getCell(10).value?.toString();
-        const subDate = subDateStr ? new Date(subDateStr) : new Date();
+        const leadAgentName = row.getCell(8).value?.toString();
+        const closerAgentName = row.getCell(9).value?.toString();
+        const typeStr = row.getCell(10).value?.toString();
         const amount = Number(row.getCell(11).value) || 0;
-        const type = row.getCell(12).value?.toString() || 'new';
-        const status = row.getCell(13).value?.toString() || 'completed';
-        const paymentMethod = row.getCell(14).value?.toString() || 'cash';
-        const leadAgentName = row.getCell(15).value?.toString();
-        const closerAgentName = row.getCell(16).value?.toString();
-        const serverName = row.getCell(17).value?.toString();
-        const serverExpiryStr = row.getCell(18).value?.toString();
-        const serverExpiryDate = serverExpiryStr ? new Date(serverExpiryStr) : null;
-        
-        const appType = row.getCell(19).value?.toString();
-        const appYears = Number(row.getCell(20).value) || 1;
-        const appExpiryStr = row.getCell(21).value?.toString();
-        const appExpiryDate = appExpiryStr ? new Date(appExpiryStr) : null;
-        const referrerName = row.getCell(22).value?.toString();
+        const paymentMethod = row.getCell(12).value?.toString() || 'cash';
+        const subDate = parseDate(row.getCell(13).value);
 
-        // Devices (Cols 23-37)
-        const devices: any[] = [];
-        for (let d = 0; d < 5; d++) {
-          const mac = row.getCell(23 + d * 3).value?.toString();
-          const key = row.getCell(24 + d * 3).value?.toString();
-          const name = row.getCell(25 + d * 3).value?.toString();
-          if (mac || key) {
-             devices.push({ macAddress: mac || '', deviceKey: key || '', deviceName: name || '' });
+        const serverName = row.getCell(14).value?.toString();
+        const serverExpiryDate = parseDate(row.getCell(15).value);
+        const appType = row.getCell(16).value?.toString();
+        const appYears = Number(row.getCell(17).value) || 1;
+        const appExpiryDate = parseDate(row.getCell(18).value);
+
+        // 1. Find or Create Customer
+        let customer: any = null;
+        if (customerPhone) {
+          customer = await this.customerModel.findOne({ phone: customerPhone }).exec();
+          if (!customer) {
+            customer = new this.customerModel({
+              name: customerName,
+              phone: customerPhone,
+              email: customerEmail,
+              address: customerAddress,
+              state: customerState,
+              country: customerCountry
+            });
+            await customer.save();
+          }
+          lastValidCustomer = customer;
+        } else if (lastValidCustomer) {
+          customer = lastValidCustomer;
+        } else {
+          customer = await this.customerModel.findOne({ name: customerName }).exec();
+          if (!customer) {
+             throw new Error('رقم الهاتف مطلوب للعملاء الجدد');
           }
         }
 
-        const attachmentsStr = row.getCell(38).value?.toString();
-        const attachments = attachmentsStr ? attachmentsStr.split(',').map(s => s.trim()) : [];
-        const invoiceFile = row.getCell(39).value?.toString();
-        const notes = row.getCell(40).value?.toString();
-
-        // 1. Find or Create Customer
-        let customer = await this.customerModel.findOne({ phone: customerPhone }).exec();
-        if (!customer && customerPhone) {
-          customer = new this.customerModel({
-            name: customerName,
-            phone: customerPhone,
-            email: customerEmail,
-            address: customerAddress,
-            state: customerState,
-            country: customerCountry,
-            latitude: customerLat,
-            longitude: customerLng
-          });
-          await customer.save();
-        }
-
         // 2. Map Agents
-        const leadAgent = agents.find(a => a.name === leadAgentName);
-        const closerAgent = agents.find(a => a.name === closerAgentName);
+        const leadAgent = agents.find(a => a.name === leadAgentName || a.email === leadAgentName);
+        const closerAgent = agents.find(a => a.name === closerAgentName || a.email === closerAgentName);
 
         // 3. Create Order
         const order = new this.orderModel({
           customer: customer?._id,
           subscriptionDate: subDate,
           amount,
-          type,
-          status,
+          type: mapType(typeStr || ''),
+          status: 'completed',
           paymentMethod,
-          leadAgent: leadAgent?._id || agents[0]?._id,
-          closerAgent: closerAgent?._id || agents[0]?._id,
+          leadAgent: leadAgent?._id || companyAgent?._id || agents[0]?._id,
+          closerAgent: closerAgent?._id || companyAgent?._id || agents[0]?._id,
           serverName,
           serverExpiryDate,
           appType,
           appYears,
           appExpiryDate,
-          referrerName,
-          attachments,
-          invoiceFile,
-          notes,
-          devices: devices
+          notes: `Imported from Excel. Original Name: ${customerName}`,
+          devices: (mac || key) ? [device] : []
         });
 
-        await order.save();
+        lastOrder = await order.save();
         results.success++;
       } catch (err) {
         results.failed++;
-        results.errors.push(`Row ${i}: ${err.message}`);
+        results.errors.push(`Row ${i} (${customerName}): ${err.message}`);
       }
     }
 

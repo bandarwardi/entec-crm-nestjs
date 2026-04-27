@@ -11,6 +11,9 @@ export class OrderDevice {
 
   @Prop({ required: true })
   deviceName: string;
+
+  @Prop()
+  username: string;
 }
 
 export const OrderDeviceSchema = SchemaFactory.createForClass(OrderDevice);

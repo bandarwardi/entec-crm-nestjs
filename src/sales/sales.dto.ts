@@ -51,6 +51,10 @@ export class CreateDeviceDto {
   @IsString()
   @IsOptional()
   deviceName?: string;
+
+  @IsString()
+  @IsOptional()
+  username?: string;
 }
 
 export class CreateOrderDto {

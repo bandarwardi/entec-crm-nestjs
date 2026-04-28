@@ -17,6 +17,12 @@ export class Order {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   closerAgent: Types.ObjectId;
 
+  @Prop()
+  leadAgentName: string;
+
+  @Prop()
+  closerAgentName: string;
+
   @Prop({ type: String, enum: OrderType, default: OrderType.NEW })
   type: OrderType;
 

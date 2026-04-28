@@ -113,6 +113,12 @@ export class SalesController {
     return this.salesService.removeCustomer(id);
   }
 
+  @Post('customers/geocode-all')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async geocodeAllCustomers() {
+    return this.salesService.geocodeAllCustomers();
+  }
+
   @Post('orders/:id/send-invoice')
   async sendInvoiceEmail(@Param('id') id: string) {
     return this.salesService.sendInvoiceToCustomerEmail(id);

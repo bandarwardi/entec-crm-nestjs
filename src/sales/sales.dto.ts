@@ -74,6 +74,14 @@ export class CreateOrderDto {
   @IsString()
   closerAgentId?: string;
 
+  @IsOptional()
+  @IsString()
+  leadAgentName?: string;
+
+  @IsOptional()
+  @IsString()
+  closerAgentName?: string;
+
   @IsEnum(OrderType)
   @IsOptional()
   type?: OrderType;

@@ -518,6 +518,18 @@ export class SalesService {
               country: customerCountry
             });
             await customer.save();
+            
+            // Trigger geocoding asynchronously
+            if (customerAddress) {
+              this.geocode(customerAddress, customerState, customerCountry).then(coords => {
+                if (coords) {
+                  this.customerModel.findByIdAndUpdate(customer._id, { 
+                    latitude: coords.latitude, 
+                    longitude: coords.longitude 
+                  }).exec();
+                }
+              }).catch(e => console.error('Geocoding failed during import:', e));
+            }
           }
           lastValidCustomer = customer;
         } else if (lastValidCustomer) {
@@ -543,6 +555,8 @@ export class SalesService {
           paymentMethod,
           leadAgent: leadAgent?._id || companyAgent?._id || agents[0]?._id,
           closerAgent: closerAgent?._id || companyAgent?._id || agents[0]?._id,
+          leadAgentName: leadAgentName || '',
+          closerAgentName: closerAgentName || '',
           serverName,
           serverExpiryDate,
           appType,
@@ -854,5 +868,44 @@ export class SalesService {
     }
 
     return { success: true, email: customerEmail };
+  }
+
+  async geocodeAllCustomers() {
+    const customers = await this.customerModel.find({
+      $or: [
+        { latitude: { $exists: false } },
+        { latitude: null },
+        { longitude: { $exists: false } },
+        { longitude: null }
+      ],
+      address: { $exists: true, $ne: '' }
+    }).exec();
+
+    console.log(`[Geocoding] Found ${customers.length} customers needing geocoding.`);
+    
+    let geocodedCount = 0;
+    // Process sequentially with a delay to respect API rate limits
+    for (const customer of customers) {
+      try {
+        const coords = await this.geocode(customer.address, customer.state, customer.country);
+        if (coords) {
+          await this.customerModel.findByIdAndUpdate(customer._id, {
+            latitude: coords.latitude,
+            longitude: coords.longitude
+          }).exec();
+          geocodedCount++;
+        }
+        // Wait 1 second between requests (Nominatim limit)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (err) {
+        console.error(`[Geocoding] Failed for customer ${customer._id}:`, err.message);
+      }
+    }
+
+    return { 
+      success: true, 
+      total: customers.length, 
+      geocoded: geocodedCount 
+    };
   }
 }

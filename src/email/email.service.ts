@@ -25,9 +25,10 @@ export class EmailService {
       tls: {
         rejectUnauthorized: false
       },
-      connectionTimeout: 30000, // Increased to 30 seconds
+      connectionTimeout: 30000,
       greetingTimeout: 30000,
-      socketTimeout: 30000
+      socketTimeout: 30000,
+      family: 4 // Force IPv4
     });
   }
 

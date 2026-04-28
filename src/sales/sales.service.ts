@@ -562,7 +562,6 @@ export class SalesService {
           appType,
           appYears,
           appExpiryDate,
-          notes: `Imported from Excel. Original Name: ${customerName}`,
           devices: (mac || key) ? [device] : []
         });
 

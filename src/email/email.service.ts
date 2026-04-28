@@ -26,10 +26,13 @@ export class EmailService {
         rejectUnauthorized: false,
         minVersion: 'TLSv1.2'
       },
-      connectionTimeout: 60000, // Increase to 60s
+      connectionTimeout: 60000,
       greetingTimeout: 60000,
       socketTimeout: 60000,
-      family: 4 // Force IPv4 to avoid ENETUNREACH on IPv6
+      family: 4,
+      authMethod: 'LOGIN', // Specifically for Hostinger compatibility
+      logger: true,        // Enable logging
+      debug: true          // Enable debug mode
     };
 
     this.transporter = nodemailer.createTransport(transportOptions);

@@ -794,48 +794,55 @@ export class SalesService {
 
     if (!order) {
       console.error(`[Invoice] Order #${orderId} not found`);
-      throw new NotFoundException('Order not found');
-    }
-
-    if (!order.invoiceFile) {
-      console.error(`[Invoice] Order #${orderId} does not have an attached invoice file`);
-      throw new BadRequestException('No invoice file attached to this order. Please upload an invoice first.');
+      throw new NotFoundException('الطلب غير موجود');
     }
 
     const customerEmail = (order.customer as any).email;
     if (!customerEmail) {
       console.error(`[Invoice] Customer ${(order.customer as any).name} has no email`);
-      throw new BadRequestException('Customer does not have an email address');
+      throw new BadRequestException('العميل ليس لديه بريد إلكتروني مسجل');
     }
 
-    console.log(`[Invoice] Fetching attached invoice from ${order.invoiceFile}`);
     let fileBuffer: Buffer;
     let mimeType = 'application/pdf';
     let filename = `Invoice-INV-${order._id}.pdf`;
-    
-    try {
-      const response = await fetch(order.invoiceFile);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch file: HTTP ${response.status}`);
+
+    if (!order.invoiceFile) {
+      console.log(`[Invoice] Order #${orderId} has no invoice file. Generating PDF automatically...`);
+      const settings = await this.getInvoiceSettings();
+      try {
+        fileBuffer = await this.invoicePdfService.generateInvoiceBuffer(order as any, settings);
+        console.log(`[Invoice] PDF generated successfully (${Math.round(fileBuffer.length / 1024)}KB)`);
+      } catch (genErr) {
+        console.error(`[Invoice] Failed to generate PDF:`, genErr);
+        throw new BadRequestException(`فشل في إنشاء الفاتورة تلقائياً: ${genErr.message}`);
       }
-      const arrayBuffer = await response.arrayBuffer();
-      fileBuffer = Buffer.from(arrayBuffer);
-      const contentType = response.headers.get('content-type');
-      if (contentType) {
-        mimeType = contentType.split(';')[0].trim();
+    } else {
+      console.log(`[Invoice] Fetching attached invoice from ${order.invoiceFile}`);
+      try {
+        const response = await fetch(order.invoiceFile);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch file: HTTP ${response.status}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        fileBuffer = Buffer.from(arrayBuffer);
+        const contentType = response.headers.get('content-type');
+        if (contentType) {
+          mimeType = contentType.split(';')[0].trim();
+        }
+        // Infer filename from URL or mime
+        const urlParts = order.invoiceFile.split('/');
+        const lastPart = urlParts[urlParts.length - 1];
+        if (lastPart && lastPart.includes('.')) {
+          filename = lastPart;
+        } else if (mimeType.includes('image/')) {
+          filename = `Invoice-INV-${order._id}.${mimeType.split('/')[1]}`;
+        }
+        console.log(`[Invoice] File fetched successfully (Size: ${fileBuffer.length} bytes, Type: ${mimeType})`);
+      } catch (err) {
+        console.error(`[Invoice] Failed to fetch invoice file:`, err);
+        throw new Error(`Failed to fetch invoice file: ${err.message}`);
       }
-      // Infer filename from URL or mime
-      const urlParts = order.invoiceFile.split('/');
-      const lastPart = urlParts[urlParts.length - 1];
-      if (lastPart && lastPart.includes('.')) {
-         filename = lastPart;
-      } else if (mimeType.includes('image/')) {
-         filename = `Invoice-INV-${order._id}.${mimeType.split('/')[1]}`;
-      }
-      console.log(`[Invoice] File fetched successfully (Size: ${fileBuffer.length} bytes, Type: ${mimeType})`);
-    } catch (err) {
-      console.error(`[Invoice] Failed to fetch invoice file:`, err);
-      throw new Error(`Failed to fetch invoice file: ${err.message}`);
     }
 
     const subject = `Invoice for Order #${order._id} - EN TEC`;

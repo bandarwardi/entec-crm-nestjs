@@ -36,12 +36,18 @@
 
     .bg-wrapper {
       position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 70%;
+      height: 70%;
       z-index: 0;
-      opacity: 0.04;
+      opacity: 0.05;
       background-image: url('{{{backgroundImage}}}');
-      background-size: cover;
+      background-size: contain;
       background-position: center;
+      background-repeat: no-repeat;
+      pointer-events: none;
     }
 
     .content {

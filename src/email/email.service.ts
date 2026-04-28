@@ -23,12 +23,13 @@ export class EmailService {
         pass: this.configService.get<string>('SMTP_PASS'),
       },
       tls: {
-        rejectUnauthorized: false
+        rejectUnauthorized: false,
+        minVersion: 'TLSv1.2'
       },
-      connectionTimeout: 30000,
-      greetingTimeout: 30000,
-      socketTimeout: 30000,
-      family: 4 // Force IPv4
+      connectionTimeout: 60000, // Increase to 60s
+      greetingTimeout: 60000,
+      socketTimeout: 60000,
+      family: 4 // Force IPv4 to avoid ENETUNREACH on IPv6
     };
 
     this.transporter = nodemailer.createTransport(transportOptions);

@@ -29,7 +29,7 @@ export class EmailService {
       greetingTimeout: 30000,
       socketTimeout: 30000,
       family: 4 // Force IPv4
-    });
+    } as any);
   }
 
   async sendMail(to: string, subject: string, text: string, html?: string, attachments?: any[]) {

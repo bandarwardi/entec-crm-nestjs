@@ -1,3 +1,6 @@
+import dns from 'node:dns';
+dns.setDefaultResultOrder('ipv4first'); // Force IPv4 - fixes ENETUNREACH on Railway/Docker
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { MongoExceptionFilter } from './common/mongo-exception.filter';

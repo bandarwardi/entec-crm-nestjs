@@ -8,11 +8,14 @@ export class EmailService {
   private readonly logger = new Logger(EmailService.name);
 
   constructor(private configService: ConfigService) {
+    const host = this.configService.get<string>('SMTP_HOST', 'smtp.hostinger.com');
     const port = Number(this.configService.get<number>('SMTP_PORT', 465));
     const secure = port === 465;
 
+    this.logger.log(`Initializing EmailService with host: ${host}, port: ${port}, secure: ${secure}`);
+
     this.transporter = nodemailer.createTransport({
-      host: this.configService.get<string>('SMTP_HOST', 'smtp.hostinger.com'),
+      host: host,
       port: port,
       secure: secure,
       auth: {
@@ -22,9 +25,9 @@ export class EmailService {
       tls: {
         rejectUnauthorized: false
       },
-      connectionTimeout: 10000, // 10 seconds
-      greetingTimeout: 10000,
-      socketTimeout: 10000
+      connectionTimeout: 30000, // Increased to 30 seconds
+      greetingTimeout: 30000,
+      socketTimeout: 30000
     });
   }
 

@@ -9,8 +9,8 @@ export class EmailService {
 
   constructor(private configService: ConfigService) {
     const host = this.configService.get<string>('SMTP_HOST', 'smtp.hostinger.com');
-    const port = Number(this.configService.get<number>('SMTP_PORT', 465));
-    const secure = port === 465;
+    const port = Number(this.configService.get<number>('SMTP_PORT', 587));
+    const secure = port === 465; // true for 465, false for 587
 
     this.logger.log(`Initializing EmailService with host: ${host}, port: ${port}, secure: ${secure}`);
 
@@ -30,9 +30,10 @@ export class EmailService {
       greetingTimeout: 60000,
       socketTimeout: 60000,
       family: 4,
-      authMethod: 'LOGIN', // Specifically for Hostinger compatibility
-      logger: true,        // Enable logging
-      debug: true          // Enable debug mode
+      authMethod: 'LOGIN',
+      requireTLS: true,    // Force STARTTLS for port 587
+      logger: true,
+      debug: true
     };
 
     this.transporter = nodemailer.createTransport(transportOptions);

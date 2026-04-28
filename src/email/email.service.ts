@@ -14,7 +14,7 @@ export class EmailService {
 
     this.logger.log(`Initializing EmailService with host: ${host}, port: ${port}, secure: ${secure}`);
 
-    this.transporter = nodemailer.createTransport({
+    const transportOptions: any = {
       host: host,
       port: port,
       secure: secure,
@@ -29,7 +29,9 @@ export class EmailService {
       greetingTimeout: 30000,
       socketTimeout: 30000,
       family: 4 // Force IPv4
-    } as any);
+    };
+
+    this.transporter = nodemailer.createTransport(transportOptions);
   }
 
   async sendMail(to: string, subject: string, text: string, html?: string, attachments?: any[]) {

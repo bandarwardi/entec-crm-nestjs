@@ -96,6 +96,12 @@ export class UsersService {
       .exec();
   }
 
+  async findAllOnline() {
+    return this.userModel.find({
+      currentStatus: { $in: [UserStatus.ONLINE, UserStatus.BUSY, UserStatus.BREAK] }
+    }).select('id name currentStatus').exec();
+  }
+
   async findOne(id: any): Promise<User | null> {
     return this.userModel.findById(id)
       .select('id name email role avatar currentStatus createdAt fcmToken')

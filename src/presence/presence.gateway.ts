@@ -14,6 +14,8 @@ import { WsTokenStore } from '../auth/ws-token.store';
     origin: '*', // tighten this in production
     credentials: true,
   },
+  pingInterval: 10000,
+  pingTimeout: 5000,
 })
 export class PresenceGateway
   implements OnGatewayConnection, OnGatewayDisconnect
@@ -50,7 +52,10 @@ export class PresenceGateway
 
     // Attach userId to socket for cleanup on disconnect
     socket.data.userId = userId;
-    await this.presenceService.register(userId, socket);
+    const change = await this.presenceService.register(userId, socket);
+    if (change) {
+      this.server.emit('statusChanged', change);
+    }
     console.log(`[PresenceGateway] User ${userId} registered successfully`);
 
     socket.emit('connected', { status: 'ok' });
@@ -58,6 +63,9 @@ export class PresenceGateway
 
   async handleDisconnect(socket: Socket): Promise<void> {
     console.log(`[PresenceGateway] Socket ${socket.id} disconnected`);
-    await this.presenceService.removeBySocket(socket);
+    const change = await this.presenceService.removeBySocket(socket);
+    if (change) {
+      this.server.emit('statusChanged', change);
+    }
   }
 }

@@ -37,6 +37,9 @@ export class WorkSettings {
 
   @Prop({ type: Number, default: 10 })
   closerAgentCommissionRate: number;
+
+  @Prop({ default: '' })
+  managerLoginToken: string;
 }
 
 export const WorkSettingsSchema = SchemaFactory.createForClass(WorkSettings);

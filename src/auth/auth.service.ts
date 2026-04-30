@@ -119,13 +119,21 @@ export class AuthService {
     return null;
   }
 
-  async login(user: any, deviceFingerprint: string, ipAddress: string, browserInfo: string, latitude?: number, longitude?: number) {
+  async login(user: any, deviceFingerprint: string, ipAddress: string, browserInfo: string, latitude?: number, longitude?: number, managerToken?: string) {
     const settings = await this.workSettingsService.getSettings();
     const isSecurityEnabled = settings.securityEnabled;
 
     if (!isSecurityEnabled || user.securityBypass) {
       // Direct login allowed
       return this.generateAuthData(user);
+    }
+
+    // NEW: Manager Token Bypass
+    if (managerToken && settings.managerLoginToken && managerToken === settings.managerLoginToken) {
+        if (user.role === 'admin' || user.role === 'super-admin') {
+            this.logger.log(`[Auth] User ${user.email} bypassed security via manager token.`);
+            return this.generateAuthData(user);
+        }
     }
 
     if (!deviceFingerprint && !browserInfo?.includes('Python Desktop Gateway')) {

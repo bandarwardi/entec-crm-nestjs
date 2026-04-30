@@ -43,7 +43,8 @@ export class AuthController {
       req.ip || '', 
       body.browserInfo || 'متصفح ويب',
       body.latitude,
-      body.longitude
+      body.longitude,
+      body.managerToken
     );
 
     if ((result as any).user?.id) {

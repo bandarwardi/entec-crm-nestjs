@@ -7,6 +7,7 @@ import { CacheService } from '../common/cache.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UsersService } from '../users/users.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 
 @Injectable()
 export class LeadsService {
@@ -18,6 +19,7 @@ export class LeadsService {
     private readonly cacheService: CacheService,
     private readonly usersService: UsersService,
     private notificationsService: NotificationsService,
+    private whatsappService: WhatsappService,
   ) { }
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -33,14 +35,18 @@ export class LeadsService {
       }).exec();
 
       if (pendingReminders.length > 0) {
-        this.logger.log(`Cron: Found ${pendingReminders.length} pending reminders to notify`);
+        this.logger.log(`Cron: Found ${pendingReminders.length} pending reminders`);
         
-        // Find all admins and super-admins
+        // Find all admins and super-admins for internal notifications
         const allUsers = await this.usersService.findAll();
         const adminIds = allUsers
           .filter(u => u.role === 'admin' || u.role === 'super-admin')
           .map(u => (u as any).id || (u as any)._id.toString());
         
+        // Find an active WhatsApp channel for automated follow-up
+        const activeChannels = await this.whatsappService.getChannels({ role: 'super-admin' }); // Get all active
+        const connectedChannel = activeChannels.find(c => c.status === 'connected');
+
         for (const lead of pendingReminders) {
           try {
             if (!lead.createdBy) {
@@ -49,12 +55,9 @@ export class LeadsService {
             }
 
             const creatorId = lead.createdBy.toString();
-            
-            // Build unique recipient list (creator + admins)
             const recipients = Array.from(new Set([creatorId, ...adminIds]));
 
-            this.logger.log(`Processing reminder for lead ${lead._id}. Total recipients: ${recipients.length}`);
-
+            // 1. Internal Notification (System Push)
             await this.notificationsService.createBulk(
               recipients,
               'lead_reminder',
@@ -63,9 +66,24 @@ export class LeadsService {
               { leadId: lead._id.toString() }
             );
 
+            // 2. Automated WhatsApp Follow-up (To Customer)
+            if (connectedChannel && lead.phone && lead.reminderNote) {
+              this.logger.log(`Sending automated WhatsApp follow-up to ${lead.phone} for lead ${lead._id}`);
+              try {
+                await this.whatsappService.sendDirectMessage(
+                  connectedChannel._id.toString(),
+                  lead._id.toString(),
+                  lead.reminderNote, // Use the reminder note as the message content
+                  creatorId,
+                  'System Auto-Followup'
+                );
+              } catch (waError) {
+                this.logger.error(`Failed to send automated WhatsApp for lead ${lead._id}: ${waError.message}`);
+              }
+            }
+
             lead.reminderNotified = true;
             await lead.save();
-            this.logger.log(`Reminder notification sent for lead ${lead._id} to ${recipients.length} recipients`);
           } catch (error) {
             this.logger.error(`Failed to process reminder for lead ${lead._id}: ${error.message}`);
           }
@@ -196,6 +214,19 @@ export class LeadsService {
 
     return this.leadModel.find(filter)
       .sort({ createdAt: -1 })
+      .populate('createdBy', 'id name email role')
+      .exec();
+  }
+
+  async findReminders(user: any) {
+    const filter: any = { reminderAt: { $ne: null } };
+    
+    if (user.role === 'agent') {
+      filter.createdBy = new Types.ObjectId(user.userId);
+    }
+
+    return this.leadModel.find(filter)
+      .sort({ reminderAt: 1 })
       .populate('createdBy', 'id name email role')
       .exec();
   }

@@ -33,7 +33,10 @@ export class WorkSettings {
   autoLogoutDelayMinutes: number;
 
   @Prop({ type: Number, default: 5 })
-  challengeExpiryMinutes: number;
+  leadAgentCommissionRate: number;
+
+  @Prop({ type: Number, default: 10 })
+  closerAgentCommissionRate: number;
 }
 
 export const WorkSettingsSchema = SchemaFactory.createForClass(WorkSettings);

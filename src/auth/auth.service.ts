@@ -13,6 +13,7 @@ import { FirebaseService } from '../firebase/firebase.service';
 import * as crypto from 'crypto';
 import { WsTokenStore } from './ws-token.store';
 import { PresenceService } from '../presence/presence.service';
+import { LoginLog, LoginLogDocument } from './schemas/login-log.schema';
 
 
 @Injectable()
@@ -29,7 +30,8 @@ export class AuthService {
     private readonly presenceService: PresenceService,
     @InjectModel(LoginRequest.name) private loginRequestModel: Model<LoginRequestDocument>,
     @InjectModel(LoginChallenge.name) private loginChallengeModel: Model<LoginChallengeDocument>,
-    @InjectModel(DesktopUser.name) private desktopUserModel: Model<DesktopUserDocument>
+    @InjectModel(DesktopUser.name) private desktopUserModel: Model<DesktopUserDocument>,
+    @InjectModel(LoginLog.name) private loginLogModel: Model<LoginLogDocument>
   ) {}
 
 
@@ -52,6 +54,14 @@ export class AuthService {
     // Issue token for the linked CRM user if available, otherwise for the desktop user itself
     const targetUserId = user.linkedUser || user._id.toString();
     const wsToken = this.wsTokenStore.issue(targetUserId);
+
+    await this.recordLoginAttempt({
+      user: user.linkedUser || user._id,
+      email: username,
+      status: 'success',
+      platform: 'desktop',
+      deviceInfo: 'Desktop Application'
+    });
     
     // If there is a linked CRM user, generate a real JWT for them
     let authData: any = null;
@@ -155,11 +165,31 @@ export class AuthService {
         await newRequest.save();
       }
 
+      await this.recordLoginAttempt({
+        user: fullUser._id,
+        email: user.email,
+        status: 'request_pending',
+        ipAddress,
+        deviceFingerprint: currentFingerprint,
+        deviceInfo: browserInfo,
+        platform: 'web'
+      });
+
       return { 
         status: 'request_pending', 
         message: 'جهازك غير مسجل. تم إرسال طلب اعتماد لجهازك إلى الإدارة، يرجى المحاولة لاحقاً بعد الموافقة.' 
       };
     }
+
+    await this.recordLoginAttempt({
+      user: fullUser._id,
+      email: user.email,
+      status: 'success',
+      ipAddress,
+      deviceFingerprint: currentFingerprint,
+      deviceInfo: browserInfo,
+      platform: 'web'
+    });
 
     // --- TEMPORARY BYPASS: Mobile App Challenge ---
     // (Bypassed until app store developer accounts are ready)
@@ -316,9 +346,31 @@ export class AuthService {
           await newRequest.save();
         }
 
+        await this.recordLoginAttempt({
+          user: fullUser._id,
+          email: fullUser.email,
+          status: 'rejected',
+          ipAddress,
+          deviceFingerprint: currentFingerprint,
+          deviceInfo: 'تطبيق الهاتف (Mobile App)',
+          platform: 'mobile',
+          failureReason: 'الجهاز غير مسجل'
+        });
+
         throw new UnauthorizedException('جهاز الهاتف هذا غير مسجل. تم إرسال طلب اعتماد للإدارة، يرجى المحاولة بعد الموافقة.');
       }
     }
+
+    await this.recordLoginAttempt({
+      user: user.id || user._id,
+      email: user.email,
+      status: 'success',
+      ipAddress,
+      deviceFingerprint,
+      deviceInfo: 'تطبيق الهاتف (Mobile App)',
+      platform: 'mobile'
+    });
+
     return this.generateAuthData(user); // Grants application a valid token for push and interaction
   }
 
@@ -416,5 +468,55 @@ export class AuthService {
 
   isPresenceActive(userId: string): boolean {
     return this.presenceService.isActive(userId);
+  }
+
+  async recordLoginAttempt(data: {
+    user?: any;
+    email?: string;
+    status: string;
+    ipAddress?: string;
+    deviceFingerprint?: string;
+    deviceInfo?: string;
+    failureReason?: string;
+    platform?: string;
+  }) {
+    try {
+      const log = new this.loginLogModel({
+        user: data.user,
+        email: data.email,
+        status: data.status,
+        ipAddress: data.ipAddress,
+        deviceFingerprint: data.deviceFingerprint,
+        deviceInfo: data.deviceInfo,
+        failureReason: data.failureReason,
+        platform: data.platform || 'web'
+      });
+      await log.save();
+    } catch (e) {
+      this.logger.error('Failed to record login log', e);
+    }
+  }
+
+  async getLoginLogs(query: { page?: number; limit?: number; userId?: string }) {
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    const filter: any = {};
+    if (query.userId) {
+      filter.user = query.userId;
+    }
+
+    const [data, total] = await Promise.all([
+      this.loginLogModel.find(filter)
+        .populate('user', 'name email role avatar')
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.loginLogModel.countDocuments(filter).exec()
+    ]);
+
+    return { data, total, page, limit };
   }
 }

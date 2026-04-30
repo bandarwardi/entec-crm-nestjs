@@ -92,13 +92,13 @@ export class UsersService {
     } : {};
 
     return this.userModel.find(filter)
-      .select('id name email role avatar currentStatus createdAt')
+      .select('id name email role avatar currentStatus createdAt fcmToken')
       .exec();
   }
 
   async findOne(id: any): Promise<User | null> {
     return this.userModel.findById(id)
-      .select('id name email role avatar currentStatus createdAt')
+      .select('id name email role avatar currentStatus createdAt fcmToken')
       .exec();
   }
 

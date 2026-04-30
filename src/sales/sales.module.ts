@@ -10,6 +10,7 @@ import { SalesController } from './sales.controller';
 import { SalesCacheCron } from './sales-cache.cron';
 import { InvoicePdfService } from './invoice-pdf.service';
 import { EmailModule } from '../email/email.module';
+import { WorkSettingsModule } from '../work-settings/work-settings.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { EmailModule } from '../email/email.module';
       { name: User.name, schema: UserSchema },
     ]),
     EmailModule,
+    WorkSettingsModule,
   ],
   providers: [SalesService, SalesCacheCron, InvoicePdfService],
   controllers: [SalesController],

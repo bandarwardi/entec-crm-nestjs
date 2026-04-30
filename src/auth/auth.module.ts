@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { LoginRequest, LoginRequestSchema } from './schemas/login-request.schema';
 import { LoginChallenge, LoginChallengeSchema } from './schemas/login-challenge.schema';
 import { DesktopUser, DesktopUserSchema } from './schemas/desktop-user.schema';
+import { LoginLog, LoginLogSchema } from './schemas/login-log.schema';
 import { UsersModule } from '../users/users.module';
 import { WorkSettingsModule } from '../work-settings/work-settings.module';
 import { PassportModule } from '@nestjs/passport';
@@ -25,7 +26,8 @@ import { WsTokenStore } from './ws-token.store';
     MongooseModule.forFeature([
       { name: LoginRequest.name, schema: LoginRequestSchema },
       { name: LoginChallenge.name, schema: LoginChallengeSchema },
-      { name: DesktopUser.name, schema: DesktopUserSchema }
+      { name: DesktopUser.name, schema: DesktopUserSchema },
+      { name: LoginLog.name, schema: LoginLogSchema }
     ]),
     JwtModule.registerAsync({
       imports: [ConfigModule],

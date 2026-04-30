@@ -12,6 +12,8 @@ import { UploadProxyService } from '../common/upload-proxy.service';
 import * as bcrypt from 'bcrypt';
 import { UserStatus, BreakReason } from './user-status.enum';
 
+import { AuditLogService } from '../audit-log/audit-log.service';
+
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard, SessionGuard)
 export class UsersController {
@@ -19,6 +21,7 @@ export class UsersController {
     private readonly usersService: UsersService,
     private readonly performanceService: PerformanceService,
     private readonly uploadProxy: UploadProxyService,
+    private readonly auditLogService: AuditLogService
   ) { }
 
   @Post('seed')
@@ -44,11 +47,26 @@ export class UsersController {
     return this.usersService.updateStatus(req.user.userId, body.status, body.breakReason, body.notes);
   }
 
+  @Put('fcm-token')
+  async updateFcmToken(@Request() req: any, @Body() body: { fcmToken: string }) {
+    if (!body.fcmToken) throw new BadRequestException('FCM Token is required');
+    await this.usersService.update(req.user.userId, { fcmToken: body.fcmToken });
+    return { success: true };
+  }
+
   @Put('change-password')
   async changePassword(@Request() req: any, @Body() body: { password: string }) {
     if (!body.password) throw new BadRequestException('Password is required');
     const passwordHash = await bcrypt.hash(body.password, 10);
     await this.usersService.update(req.user.userId, { passwordHash });
+    await this.auditLogService.log({
+      user: req.user.userId,
+      action: 'CHANGE_PASSWORD',
+      resource: 'User',
+      resourceId: req.user.userId,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
     return { success: true };
   }
 
@@ -74,7 +92,7 @@ export class UsersController {
 
   @Post()
   @Roles(Role.SUPER_ADMIN)
-  async create(@Body() createUserDto: any) {
+  async create(@Body() createUserDto: any, @Request() req) {
     const existing = await this.usersService.findOneByEmail(createUserDto.email);
     if (existing) throw new BadRequestException('البريد الإلكتروني موجود بالفعل');
     
@@ -92,6 +110,16 @@ export class UsersController {
       passwordHash,
     });
     
+    await this.auditLogService.log({
+      user: req.user.userId,
+      action: 'CREATE_USER',
+      resource: 'User',
+      resourceId: user.id,
+      metadata: { email: user.email, role: user.role },
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+
     const { passwordHash: _, ...result } = user;
     return result;
   }
@@ -131,7 +159,7 @@ export class UsersController {
 
   @Put(':id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
-  async update(@Param('id') id: string, @Body() updateUserDto: any) {
+  async update(@Param('id') id: string, @Body() updateUserDto: any, @Request() req) {
     const user = await this.usersService.findOne(id);
     if (!user) throw new NotFoundException('المستخدم غير موجود');
 
@@ -139,16 +167,34 @@ export class UsersController {
       updateUserDto.passwordHash = await bcrypt.hash(updateUserDto.password, 10);
       delete updateUserDto.password;
     }
-    return this.usersService.update(id, updateUserDto);
+    const updated = await this.usersService.update(id, updateUserDto);
+    await this.auditLogService.log({
+      user: req.user.userId,
+      action: 'UPDATE_USER',
+      resource: 'User',
+      resourceId: id,
+      metadata: updateUserDto,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    return updated;
   }
 
   @Delete(':id')
   @Roles(Role.SUPER_ADMIN)
-  async remove(@Param('id') id: string) {
+  async remove(@Param('id') id: string, @Request() req) {
     const user = await this.usersService.findOne(id);
     if (!user) throw new NotFoundException('المستخدم غير موجود');
 
     await this.usersService.remove(id);
+    await this.auditLogService.log({
+      user: req.user.userId,
+      action: 'DELETE_USER',
+      resource: 'User',
+      resourceId: id,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
     return { success: true };
   }
 
@@ -156,15 +202,35 @@ export class UsersController {
 
   @Post(':id/devices')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
-  async addAllowedDevice(@Param('id') id: string, @Body('fingerprint') fingerprint: string) {
+  async addAllowedDevice(@Param('id') id: string, @Body('fingerprint') fingerprint: string, @Request() req) {
     if (!fingerprint) throw new BadRequestException('Fingerprint is required');
-    return this.usersService.addAllowedDevice(id, fingerprint);
+    const result = await this.usersService.addAllowedDevice(id, fingerprint);
+    await this.auditLogService.log({
+      user: req.user.userId,
+      action: 'ADD_DEVICE',
+      resource: 'User',
+      resourceId: id,
+      metadata: { fingerprint },
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    return result;
   }
 
   @Delete(':id/devices/:fingerprint')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
-  async removeAllowedDevice(@Param('id') id: string, @Param('fingerprint') fingerprint: string) {
-    return this.usersService.removeAllowedDevice(id, fingerprint);
+  async removeAllowedDevice(@Param('id') id: string, @Param('fingerprint') fingerprint: string, @Request() req) {
+    const result = await this.usersService.removeAllowedDevice(id, fingerprint);
+    await this.auditLogService.log({
+      user: req.user.userId,
+      action: 'REMOVE_DEVICE',
+      resource: 'User',
+      resourceId: id,
+      metadata: { fingerprint },
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    return result;
   }
 
   @Get(':id/devices')

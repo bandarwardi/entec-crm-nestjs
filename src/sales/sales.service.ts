@@ -11,6 +11,7 @@ import { CreateCustomerDto, UpdateCustomerDto, CreateOrderDto, UpdateOrderDto, Q
 import { OrderStatus } from './order-status.enum';
 import { EmailService } from '../email/email.service';
 import { InvoicePdfService } from './invoice-pdf.service';
+import { WorkSettingsService } from '../work-settings/work-settings.service';
 import * as ExcelJS from 'exceljs';
 import { Readable } from 'stream';
 
@@ -30,6 +31,7 @@ export class SalesService {
     private cacheService: CacheService,
     private emailService: EmailService,
     private invoicePdfService: InvoicePdfService,
+    private workSettingsService: WorkSettingsService,
   ) { }
 
   // --- Invoice Settings ---
@@ -912,6 +914,67 @@ export class SalesService {
       success: true, 
       total: customers.length, 
       geocoded: geocodedCount 
+    };
+  }
+
+  async getAgentCommissions(agentId: string, month?: number, year?: number) {
+    const settings = await this.workSettingsService.getSettings();
+    const leadRate = settings.leadAgentCommissionRate || 5;
+    const closerRate = settings.closerAgentCommissionRate || 10;
+
+    const filter: any = {
+      $or: [
+        { leadAgent: new Types.ObjectId(agentId) },
+        { closerAgent: new Types.ObjectId(agentId) }
+      ],
+      status: OrderStatus.COMPLETED
+    };
+
+    if (month !== undefined && year !== undefined) {
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0, 23, 59, 59);
+      filter.createdAt = { $gte: startDate, $lte: endDate };
+    }
+
+    const orders = await this.orderModel.find(filter).populate('customer').exec();
+
+    let totalLeadCommission = 0;
+    let totalCloserCommission = 0;
+    const orderDetails = orders.map(order => {
+      let commission = 0;
+      let role = '';
+
+      if (order.leadAgent.toString() === agentId) {
+        const amt = (order.amount * leadRate) / 100;
+        commission += amt;
+        totalLeadCommission += amt;
+        role = 'Lead';
+      }
+      
+      if (order.closerAgent.toString() === agentId) {
+        const amt = (order.amount * closerRate) / 100;
+        commission += amt;
+        totalCloserCommission += amt;
+        role = role ? 'Both' : 'Closer';
+      }
+
+      return {
+        orderId: order._id,
+        customerName: (order.customer as any)?.name,
+        amount: order.amount,
+        commission,
+        role,
+        date: order.createdAt
+      };
+    });
+
+    return {
+      total: totalLeadCommission + totalCloserCommission,
+      leadTotal: totalLeadCommission,
+      closerTotal: totalCloserCommission,
+      count: orders.length,
+      orders: orderDetails,
+      rates: { leadRate, closerRate }
     };
   }
 }

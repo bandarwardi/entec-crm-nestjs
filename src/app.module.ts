@@ -20,6 +20,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { PresenceModule } from './presence/presence.module';
 import { BullModule } from '@nestjs/bullmq';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { AuditLogModule } from './audit-log/audit-log.module';
 import { APP_GUARD } from '@nestjs/core';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
@@ -80,6 +81,7 @@ import { join } from 'path';
     FirebaseModule,
     NotificationsModule,
     DashboardModule,
+    AuditLogModule,
     CommonModule,
     ScheduleModule.forRoot(),
     RedisModule.forRootAsync({

@@ -26,6 +26,14 @@ export class AuthController {
     const user = await this.authService.validateUser(body.email || body.username, body.password);
 
     if (!user) {
+      await this.authService.recordLoginAttempt({
+        email: body.email || body.username,
+        status: 'failure',
+        ipAddress: req.ip || '',
+        deviceInfo: body.browserInfo || 'متصفح ويب',
+        platform: 'web',
+        failureReason: 'البريد الإلكتروني أو كلمة المرور غير صحيحة'
+      });
       throw new UnauthorizedException('البريد الإلكتروني أو كلمة المرور غير صحيحة');
     }
 
@@ -54,7 +62,17 @@ export class AuthController {
   @Post('desktop/login')
   @HttpCode(200)
   async desktopLogin(@Body() body: any) {
-    return this.authService.desktopLogin(body.username, body.password);
+    const result = await this.authService.desktopLogin(body.username, body.password).catch(async (e) => {
+      await this.authService.recordLoginAttempt({
+        email: body.username,
+        status: 'failure',
+        platform: 'desktop',
+        deviceInfo: 'Desktop Application',
+        failureReason: e.message
+      });
+      throw e;
+    });
+    return result;
   }
 
   @SkipSession()
@@ -99,6 +117,14 @@ export class AuthController {
   async mobileLogin(@Body() body: any, @Ip() ip: string) {
     const user = await this.authService.validateUser(body.email, body.password);
     if (!user) {
+      await this.authService.recordLoginAttempt({
+        email: body.email,
+        status: 'failure',
+        ipAddress: ip,
+        platform: 'mobile',
+        deviceInfo: 'تطبيق الهاتف (Mobile App)',
+        failureReason: 'البريد الإلكتروني أو كلمة المرور غير صحيحة'
+      });
       throw new UnauthorizedException('البريد الإلكتروني أو كلمة المرور غير صحيحة');
     }
     return this.authService.mobileLogin(user, body.deviceFingerprint, ip);
@@ -153,6 +179,13 @@ export class AuthController {
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   async updateStatus(@Param('id') id: string, @Param('status') status: string, @Body('trustDevice') trustDevice?: boolean) {
     return this.authService.updateRequestStatus(id, status, trustDevice);
+  }
+
+  @Get('login-logs')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async getLoginLogs(@Query() query: any) {
+    return this.authService.getLoginLogs(query);
   }
   
   @Post('verify-password')

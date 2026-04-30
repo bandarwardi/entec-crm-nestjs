@@ -26,7 +26,7 @@ export class PresenceGateway
     private readonly wsTokenStore: WsTokenStore,
   ) {}
 
-  handleConnection(socket: Socket): void {
+  async handleConnection(socket: Socket): Promise<void> {
     console.log('[PresenceGateway] New connection attempt:', socket.id);
     // Check both auth and query for wsToken
     const wsToken = (socket.handshake.auth?.wsToken || socket.handshake.query?.wsToken) as string;
@@ -50,14 +50,14 @@ export class PresenceGateway
 
     // Attach userId to socket for cleanup on disconnect
     socket.data.userId = userId;
-    this.presenceService.register(userId, socket);
+    await this.presenceService.register(userId, socket);
     console.log(`[PresenceGateway] User ${userId} registered successfully`);
 
     socket.emit('connected', { status: 'ok' });
   }
 
-  handleDisconnect(socket: Socket): void {
+  async handleDisconnect(socket: Socket): Promise<void> {
     console.log(`[PresenceGateway] Socket ${socket.id} disconnected`);
-    this.presenceService.removeBySocket(socket);
+    await this.presenceService.removeBySocket(socket);
   }
 }

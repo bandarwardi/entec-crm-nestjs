@@ -13,11 +13,21 @@ export class PresenceService {
   private socketToUser = new Map<string, string>();
   // userId → timestamp (Server-side grace period)
   private lastLoginMap = new Map<string, number>();
+  // userId → Set of manager-bypass tokens (persistent sessions)
+  private managerBypassUsers = new Set<string>();
 
   constructor(private readonly usersService: UsersService) {}
 
-  recordLogin(userId: string): void {
+  recordLogin(userId: string, isManagerBypass: boolean = false): void {
     this.lastLoginMap.set(userId, Date.now());
+    if (isManagerBypass) {
+      this.managerBypassUsers.add(userId);
+      this.logger.log(`[Presence] User ${userId} marked as Manager Bypass`);
+    }
+  }
+
+  clearManagerBypass(userId: string): void {
+    this.managerBypassUsers.delete(userId);
   }
 
   async register(userId: string, socket: Socket): Promise<{ status: UserStatus; userId: string } | null> {
@@ -83,6 +93,12 @@ export class PresenceService {
         console.log(`[PresenceService] User ${userId} is within server-side grace period. Treating as active.`);
         active = true;
       }
+    }
+
+    // Manager Bypass: If user is marked as manager bypass, they are always active
+    if (!active && this.managerBypassUsers.has(userId)) {
+      console.log(`[PresenceService] User ${userId} is a Manager Bypass session. Treating as active.`);
+      active = true;
     }
     
     console.log(`[PresenceGuard] Check userId: ${userId} | Active: ${active}`);

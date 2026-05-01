@@ -132,7 +132,7 @@ export class AuthService {
     if (managerToken && settings.managerLoginToken && managerToken === settings.managerLoginToken) {
         if (user.role === 'admin' || user.role === 'super-admin') {
             this.logger.log(`[Auth] User ${user.email} bypassed security via manager token.`);
-            return this.generateAuthData(user);
+            return this.generateAuthData(user, true);
         }
     }
 
@@ -392,11 +392,11 @@ export class AuthService {
      return { success: true };
   }
 
-  private async generateAuthData(user: any) {
+  private async generateAuthData(user: any, isManagerBypass: boolean = false) {
     const userId = (user.id || user._id).toString();
     
     // Start grace period in PresenceService
-    this.presenceService.recordLogin(userId);
+    this.presenceService.recordLogin(userId, isManagerBypass);
 
     const payload = { email: user.email, sub: userId, role: user.role, name: user.name };
     await this.usersService.updateStatus(userId, UserStatus.ONLINE);
@@ -465,6 +465,7 @@ export class AuthService {
   }
 
   async logout(userId: any) {
+    this.presenceService.clearManagerBypass(userId.toString());
     return this.usersService.updateStatus(userId, UserStatus.OFFLINE);
   }
 
@@ -526,5 +527,10 @@ export class AuthService {
     ]);
 
     return { data, total, page, limit };
+  }
+
+  async verifyManagerToken(token: string): Promise<boolean> {
+    const settings = await this.workSettingsService.getSettings();
+    return !!settings.managerLoginToken && token === settings.managerLoginToken;
   }
 }

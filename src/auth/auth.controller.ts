@@ -238,4 +238,11 @@ export class AuthController {
       crm_user: req.cookies?.['crm_user']
     };
   }
+
+  @SkipSession()
+  @Get('verify-manager-token')
+  async verifyManagerToken(@Query('token') token: string) {
+    const isValid = await this.authService.verifyManagerToken(token);
+    return { isValid };
+  }
 }

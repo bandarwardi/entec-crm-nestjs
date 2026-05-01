@@ -13,17 +13,24 @@ export class PresenceService {
   private socketToUser = new Map<string, string>();
   // userId → timestamp (Server-side grace period)
   private lastLoginMap = new Map<string, number>();
-  // userId → Set of manager-bypass tokens (persistent sessions)
-  private managerBypassUsers = new Set<string>();
+  // userId → expiration timestamp (persistent bypass sessions)
+  private managerBypassUsers = new Map<string, number>();
+
+  private readonly BYPASS_TTL = 10 * 60 * 1000; // 10 minutes TTL for bypass sessions
 
   constructor(private readonly usersService: UsersService) {}
 
   recordLogin(userId: string, isManagerBypass: boolean = false): void {
     this.lastLoginMap.set(userId, Date.now());
     if (isManagerBypass) {
-      this.managerBypassUsers.add(userId);
-      this.logger.log(`[Presence] User ${userId} marked as Manager Bypass`);
+      this.registerManagerBypass(userId);
     }
+  }
+
+  registerManagerBypass(userId: string): void {
+    // Set expiration to 10 minutes from now
+    this.managerBypassUsers.set(userId, Date.now() + this.BYPASS_TTL);
+    this.logger.log(`[Presence] User ${userId} registered/refreshed for Manager Bypass (TTL: 10m)`);
   }
 
   clearManagerBypass(userId: string): void {
@@ -38,7 +45,6 @@ export class PresenceService {
     let changed = false;
     if (!this.activeConnections.has(userId)) {
       this.activeConnections.set(userId, new Set());
-      // First connection, set user as online in DB
       await this.usersService.updateStatus(userId, UserStatus.ONLINE);
       changed = true;
     }
@@ -60,7 +66,6 @@ export class PresenceService {
       sockets.delete(socket);
       if (sockets.size === 0) {
         this.activeConnections.delete(userId);
-        // Last connection closed, set user as offline in DB
         await this.usersService.updateStatus(userId, UserStatus.OFFLINE);
         changed = true;
       }
@@ -71,12 +76,25 @@ export class PresenceService {
   @Cron(CronExpression.EVERY_MINUTE)
   async cleanupStaleStatuses() {
     this.logger.log('[Presence] Running scheduled status synchronization...');
-    // Get all users marked as ONLINE or BUSY or BREAK in DB
-    const onlineUsers = await this.usersService.findAllOnline();
     
+    // 1. Cleanup expired bypass sessions
+    const now = Date.now();
+    for (const [userId, expiresAt] of this.managerBypassUsers.entries()) {
+      if (now > expiresAt) {
+        this.managerBypassUsers.delete(userId);
+        this.logger.log(`[Presence] Manager Bypass session expired for user ${userId}`);
+      }
+    }
+
+    // 2. Cleanup users marked online in DB but having no active sockets/bypass
+    const onlineUsers = await this.usersService.findAllOnline();
     for (const user of onlineUsers) {
-      if (!this.activeConnections.has(user.id.toString())) {
-        this.logger.warn(`User ${user.name} (${user.id}) marked as online but has no active socket. Fixing...`);
+      const userId = user.id.toString();
+      const hasSockets = this.activeConnections.has(userId);
+      const isBypass = this.managerBypassUsers.has(userId);
+
+      if (!hasSockets && !isBypass) {
+        this.logger.warn(`User ${user.name} (${userId}) marked as online but no active presence. Fixing...`);
         await this.usersService.updateStatus(user.id, UserStatus.OFFLINE);
       }
     }
@@ -86,22 +104,21 @@ export class PresenceService {
     const sockets = this.activeConnections.get(userId);
     let active = !!sockets && sockets.size > 0;
     
-    // Server-side grace period: If not active via WS, check if they just logged in (< 15s ago)
     if (!active) {
       const lastLogin = this.lastLoginMap.get(userId);
       if (lastLogin && (Date.now() - lastLogin < 15000)) {
-        console.log(`[PresenceService] User ${userId} is within server-side grace period. Treating as active.`);
         active = true;
       }
     }
 
-    // Manager Bypass: If user is marked as manager bypass, they are always active
-    if (!active && this.managerBypassUsers.has(userId)) {
-      console.log(`[PresenceService] User ${userId} is a Manager Bypass session. Treating as active.`);
-      active = true;
+    // Manager Bypass: Check if session is still valid (not expired)
+    if (!active) {
+      const expiresAt = this.managerBypassUsers.get(userId);
+      if (expiresAt && Date.now() < expiresAt) {
+        active = true;
+      }
     }
     
-    console.log(`[PresenceGuard] Check userId: ${userId} | Active: ${active}`);
     return active;
   }
 }

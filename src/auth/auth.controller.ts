@@ -241,8 +241,8 @@ export class AuthController {
 
   @SkipSession()
   @Get('verify-manager-token')
-  async verifyManagerToken(@Query('token') token: string) {
-    const isValid = await this.authService.verifyManagerToken(token);
+  async verifyManagerToken(@Query('token') token: string, @Query('userId') userId?: string) {
+    const isValid = await this.authService.verifyManagerToken(token, userId);
     return { isValid };
   }
 }

@@ -529,8 +529,14 @@ export class AuthService {
     return { data, total, page, limit };
   }
 
-  async verifyManagerToken(token: string): Promise<boolean> {
+  async verifyManagerToken(token: string, userId?: string): Promise<boolean> {
     const settings = await this.workSettingsService.getSettings();
-    return !!settings.managerLoginToken && token === settings.managerLoginToken;
+    const isValid = !!settings.managerLoginToken && token === settings.managerLoginToken;
+    
+    if (isValid && userId) {
+      await this.presenceService.registerManagerBypass(userId);
+    }
+    
+    return isValid;
   }
 }

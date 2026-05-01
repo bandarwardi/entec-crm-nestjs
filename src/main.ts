@@ -1,5 +1,5 @@
 import dns from 'node:dns';
-dns.setDefaultResultOrder('ipv4first'); // Force IPv4 - fixes ENETUNREACH on Railway/Docker
+dns.setDefaultResultOrder('ipv4first'); // Force IPv4 - fixes ENETUNREACH on Railway/Docker.
 
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -8,9 +8,9 @@ import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  
+
   app.use(cookieParser());
-  
+
   app.enableCors({
     origin: true,
     credentials: true,

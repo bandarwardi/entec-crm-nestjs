@@ -316,7 +316,7 @@ export class PerformanceService {
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' }); // or whichever model is best
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro' }); // Using the available 2.5 pro model
 
     const hoursActive = Math.floor(totals.totalActiveMinutes / 60);
     const minutesActive = totals.totalActiveMinutes % 60;

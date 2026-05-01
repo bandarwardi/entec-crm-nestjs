@@ -6,6 +6,10 @@ import { UserActivity, UserActivityDocument } from './schemas/user-activity.sche
 import { UserStatus } from './user-status.enum';
 import { WorkSettingsService } from '../work-settings/work-settings.service';
 import { DateTime } from 'luxon';
+import { Lead, LeadDocument } from '../leads/schemas/lead.schema';
+import { Order, OrderDocument } from '../sales/schemas/order.schema';
+import { ConfigService } from '@nestjs/config';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Grace period in minutes: allow login up to this many minutes before shift start
 const EARLY_LOGIN_GRACE_MINUTES = 5;
@@ -17,7 +21,12 @@ export class PerformanceService {
     private userModel: Model<UserDocument>,
     @InjectModel(UserActivity.name)
     private activityModel: Model<UserActivityDocument>,
+    @InjectModel(Lead.name)
+    private leadModel: Model<LeadDocument>,
+    @InjectModel(Order.name)
+    private orderModel: Model<OrderDocument>,
     private workSettingsService: WorkSettingsService,
+    private configService: ConfigService,
   ) { }
 
   async getMonthlyPerformance(userId: string, year: number, month: number) {
@@ -265,5 +274,78 @@ export class PerformanceService {
         deductionAmount,
       }
     };
+  }
+
+  async getAiPerformanceReport(userId: string, year: number, month: number): Promise<{ report: string }> {
+    const monthlyData = await this.getMonthlyPerformance(userId, year, month);
+    if (!monthlyData) {
+      throw new Error('User not found or no performance data available.');
+    }
+
+    const { totals, user } = monthlyData;
+
+    const timezone = monthlyData.workSettings?.timezone || 'Africa/Cairo';
+    const monthStart = DateTime.fromObject({ year, month, day: 1 }, { zone: timezone }).startOf('day');
+    const monthEnd = monthStart.endOf('month');
+
+    // Fetch Leads for this user
+    const leadsCount = await this.leadModel.countDocuments({
+      createdBy: userId,
+      createdAt: {
+        $gte: monthStart.toJSDate(),
+        $lte: monthEnd.toJSDate(),
+      },
+    }).exec();
+
+    // Fetch Sales for this user (leadAgent or closerAgent)
+    const sales = await this.orderModel.find({
+      $or: [{ leadAgent: userId }, { closerAgent: userId }],
+      createdAt: {
+        $gte: monthStart.toJSDate(),
+        $lte: monthEnd.toJSDate(),
+      },
+      status: 'completed' // Assuming we only count completed orders
+    }).exec();
+
+    const salesCount = sales.length;
+    const totalSalesAmount = sales.reduce((sum, order) => sum + (order.amount || 0), 0);
+
+    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY is not configured.');
+    }
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' }); // or whichever model is best
+
+    const hoursActive = Math.floor(totals.totalActiveMinutes / 60);
+    const minutesActive = totals.totalActiveMinutes % 60;
+    const lateMinutes = totals.totalLateMinutes;
+    const deduction = totals.totalDeductionAmount;
+    
+    const prompt = `أنت خبير موارد بشرية وتقييم أداء محترف. طلب منك إعداد تقرير تقييم أداء شهري للموظف "${user.name}" لشهر ${month}/${year}.
+
+البيانات الإحصائية لأداء الموظف خلال الشهر:
+- إجمالي ساعات العمل الفعلية: ${hoursActive} ساعة و ${minutesActive} دقيقة.
+- إجمالي أيام العمل المحتسبة: ${totals.workingDays} يوم.
+- إجمالي دقائق التأخير: ${lateMinutes} دقيقة.
+- إجمالي الخصومات (بسبب التأخير وتجاوز وقت الراحة): ${deduction} جنيه.
+- عدد العملاء المحتملين (Leads) الذين أضافهم: ${leadsCount} عميل.
+- إجمالي عدد المبيعات التي أتمها أو شارك فيها: ${salesCount} عملية بيع.
+- إجمالي المبالغ المحصلة من هذه المبيعات: ${totalSalesAmount} جنيه.
+
+بناءً على هذه الأرقام، قم بكتابة تقرير شامل واحترافي يضم ما يلي:
+1. مقدمة قصيرة محفزة للتقرير.
+2. تحليل الأداء الانضباطي (الحضور، التأخير، ساعات العمل).
+3. تحليل الأداء الإنتاجي والمبيعات (العملاء الجدد، والمبيعات المغلقة).
+4. نقاط القوة التي يمتلكها الموظف في هذا الشهر.
+5. مجالات تحتاج إلى تحسين (نقاط الضعف إن وجدت بناءً على كثرة التأخيرات، الخصومات، أو قلة المبيعات مقارنة بساعات العمل).
+6. تقييم نهائي من 10 (مثل 8/10) مع توصية مختصرة من سطرين.
+
+استخدم تنسيق Markdown (عناوين، وقوائم نقطية) ليكون التقرير مرتباً وجاهزاً للعرض مباشرة.`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return { report: response.text() };
   }
 }

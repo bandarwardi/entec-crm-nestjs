@@ -130,6 +130,16 @@ export class UsersController {
     return this.usersService.findAll(search);
   }
 
+  @Get(':id/performance/ai-report')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async getAiPerformanceReport(
+    @Param('id') id: string,
+    @Query('year', ParseIntPipe) year: number,
+    @Query('month', ParseIntPipe) month: number,
+  ) {
+    return this.performanceService.getAiPerformanceReport(id, year, month);
+  }
+
   @Get(':id/performance')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   async getMonthlyPerformance(

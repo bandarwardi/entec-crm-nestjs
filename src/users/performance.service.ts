@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { User, UserDocument } from './schemas/user.schema';
 import { UserActivity, UserActivityDocument } from './schemas/user-activity.schema';
 import { UserStatus } from './user-status.enum';
@@ -290,7 +290,7 @@ export class PerformanceService {
 
     // Fetch Leads for this user
     const leadsCount = await this.leadModel.countDocuments({
-      createdBy: userId,
+      createdBy: new Types.ObjectId(userId),
       createdAt: {
         $gte: monthStart.toJSDate(),
         $lte: monthEnd.toJSDate(),
@@ -330,22 +330,41 @@ export class PerformanceService {
 - إجمالي أيام العمل المحتسبة: ${totals.workingDays} يوم.
 - إجمالي دقائق التأخير: ${lateMinutes} دقيقة.
 - إجمالي الخصومات (بسبب التأخير وتجاوز وقت الراحة): ${deduction} جنيه.
-- عدد العملاء المحتملين (Leads) الذين أضافهم: ${leadsCount} عميل.
+- عدد العملاء المحتملين (Leads) الذين أضافهم الموظف بنفسه: ${leadsCount} عميل.
 - إجمالي عدد المبيعات التي أتمها أو شارك فيها: ${salesCount} عملية بيع.
 - إجمالي المبالغ المحصلة من هذه المبيعات: ${totalSalesAmount} جنيه.
 
-بناءً على هذه الأرقام، قم بكتابة تقرير شامل واحترافي يضم ما يلي:
-1. مقدمة قصيرة محفزة للتقرير.
-2. تحليل الأداء الانضباطي (الحضور، التأخير، ساعات العمل).
-3. تحليل الأداء الإنتاجي والمبيعات (العملاء الجدد، والمبيعات المغلقة).
-4. نقاط القوة التي يمتلكها الموظف في هذا الشهر.
-5. مجالات تحتاج إلى تحسين (نقاط الضعف إن وجدت بناءً على كثرة التأخيرات، الخصومات، أو قلة المبيعات مقارنة بساعات العمل).
-6. تقييم نهائي من 10 (مثل 8/10) مع توصية مختصرة من سطرين.
-
-استخدم تنسيق Markdown (عناوين، وقوائم نقطية) ليكون التقرير مرتباً وجاهزاً للعرض مباشرة.`;
+بناءً على هذه الأرقام، قم بكتابة تقرير شامل واحترافي.
+يجب أن يكون الرد بصيغة JSON فقط، بالهيكل التالي (باللغة العربية):
+{
+  "summary": "مقدمة قصيرة محفزة",
+  "discipline_analysis": "تحليل الأداء الانضباطي",
+  "productivity_analysis": "تحليل الأداء الإنتاجي والمبيعات",
+  "strengths": ["نقطة قوة 1", "نقطة قوة 2"],
+  "improvements": ["مجال تحسين 1", "مجال تحسين 2"],
+  "final_score": 8.5,
+  "recommendation": "توصية مختصرة من سطرين"
+}`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
-    return { report: response.text() };
+    const text = response.text();
+    
+    try {
+      // Clean up JSON response if AI includes markdown code blocks
+      const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
+      return JSON.parse(cleanJson);
+    } catch (e) {
+      // Fallback if AI doesn't return valid JSON
+      return { 
+        summary: text,
+        discipline_analysis: "",
+        productivity_analysis: "",
+        strengths: [],
+        improvements: [],
+        final_score: 0,
+        recommendation: ""
+      } as any;
+    }
   }
 }

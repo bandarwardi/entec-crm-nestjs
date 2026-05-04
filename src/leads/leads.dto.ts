@@ -117,4 +117,10 @@ export class QueryLeadsDto {
     @IsString()
     @IsOptional()
     createdBy?: string;
+
+    @IsOptional()
+    startDate?: string;
+
+    @IsOptional()
+    endDate?: string;
 }

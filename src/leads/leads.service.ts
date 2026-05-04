@@ -97,7 +97,7 @@ export class LeadsService {
   async findAll(query: QueryLeadsDto, user: any) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 20;
-    const { search, status, state, hasReminder, createdBy } = query;
+    const { search, status, state, hasReminder, createdBy, startDate, endDate } = query;
     const skip = (page - 1) * limit;
 
     const filter: any = {};
@@ -105,6 +105,18 @@ export class LeadsService {
     if (state) filter.state = state;
     if (hasReminder === 'true') filter.reminderAt = { $ne: null };
     if (hasReminder === 'false') filter.reminderAt = null;
+
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) {
+        filter.createdAt.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = end;
+      }
+    }
 
     if (createdBy && (user.role === 'admin' || user.role === 'super-admin')) {
       filter.createdBy = new Types.ObjectId(createdBy);

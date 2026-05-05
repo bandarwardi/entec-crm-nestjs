@@ -931,9 +931,66 @@ export class SalesService {
     };
 
     if (month !== undefined && year !== undefined) {
-      const startDate = new Date(year, month - 1, 1);
-      const endDate = new Date(year, month, 0, 23, 59, 59);
-      filter.createdAt = { $gte: startDate, $lte: endDate };
+      const startDate = new Date(year, month - 1, 1, 0, 0, 0);
+      const endDate = new Date(year, month, 0, 23, 59, 59, 999);
+      
+      // Filter by subscriptionDate if it exists, otherwise fallback to createdAt
+      filter.$or = [
+        { 
+          $and: [
+            { leadAgent: new Types.ObjectId(agentId) },
+            { subscriptionDate: { $gte: startDate, $lte: endDate } }
+          ]
+        },
+        {
+          $and: [
+            { closerAgent: new Types.ObjectId(agentId) },
+            { subscriptionDate: { $gte: startDate, $lte: endDate } }
+          ]
+        },
+        {
+          $and: [
+            { leadAgent: new Types.ObjectId(agentId) },
+            { subscriptionDate: { $exists: false } },
+            { createdAt: { $gte: startDate, $lte: endDate } }
+          ]
+        },
+        {
+          $and: [
+            { closerAgent: new Types.ObjectId(agentId) },
+            { subscriptionDate: { $exists: false } },
+            { createdAt: { $gte: startDate, $lte: endDate } }
+          ]
+        }
+      ];
+      // Remove the top level $or since we've specialized it
+      delete filter.$or;
+      // Re-add the status
+      filter.status = OrderStatus.COMPLETED;
+      
+      // Re-structured specialized filter
+      filter.$and = [
+        { status: OrderStatus.COMPLETED },
+        {
+          $or: [
+            {
+              $and: [
+                { $or: [{ leadAgent: new Types.ObjectId(agentId) }, { closerAgent: new Types.ObjectId(agentId) }] },
+                { subscriptionDate: { $gte: startDate, $lte: endDate } }
+              ]
+            },
+            {
+              $and: [
+                { $or: [{ leadAgent: new Types.ObjectId(agentId) }, { closerAgent: new Types.ObjectId(agentId) }] },
+                { subscriptionDate: { $exists: false } },
+                { createdAt: { $gte: startDate, $lte: endDate } }
+              ]
+            }
+          ]
+        }
+      ];
+      delete filter.$or;
+      delete filter.status;
     }
 
     const orders = await this.orderModel.find(filter).populate('customer').exec();
